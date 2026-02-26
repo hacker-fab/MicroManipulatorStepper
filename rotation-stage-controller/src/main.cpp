@@ -20,7 +20,6 @@ int32_t last_sensor_angle = 0;
 int32_t sensor_angle_wraps = 0;
 
 
-
 /**
  * PWM
  */
@@ -43,6 +42,13 @@ int32_t sensor_angle_wraps = 0;
 #define I2C_SCL PB6
 
 
+/**
+ * Endstop & homing
+ */
+#define ROTATION_ENDSTOP PA12
+uint32_t field_angle_at_home = 0;
+int32_t sensor_angle_at_home = 0;
+
 
 /**
  * Control
@@ -50,7 +56,11 @@ int32_t sensor_angle_wraps = 0;
 
 #define STEPPER_STEPS 50
 #define LOOKUP_TABLE_SIZE (STEPPER_STEPS * 4 + 10) // 10 extra for safety margin
-int32_t angle_lookup_table[LOOKUP_TABLE_SIZE] = {0};
+int32_t angle_lookup_table[LOOKUP_TABLE_SIZE] = {
+
+    88, 73468, 144162, 217968, 299524, 392963, 495124, 587029, 664615, 742582, 832565, 926229, 1011229, 1089670, 1166791, 1242996, 1326204, 1423911, 1534225, 1630769, 1709275, 1787039, 1874922, 1964390, 2046281, 2120404, 2194579, 2267403, 2345279, 2434676, 2542563, 2646433, 2731082, 2808645, 2896512, 2990302, 3074006, 3147290, 3219543, 3289404, 3358997, 3434336, 3522631, 3620457, 3708046, 3784252, 3859348, 3940763, 4023959, 4101832, 4175037, 4244045, 4308229, 4371863, 4442688, 4523186, 4609187, 4699247, 4786158, 4863488, 4940634, 5026535, 5121367, 5211882, 5294927, 5373336, 5456016, 5551607, 5670733, 5780918, 5869442, 5952576, 6042805, 6135536, 6223927, 6305032, 6380345, 6450471, 6527734, 6617766, 6719378, 6818440, 6906505, 6986977, 7069436, 7158361, 7248035, 7328114, 7402903, 7472877, 7546647, 7629311, 7726090, 7829805, 7924167, 8005066, 8086370, 8174526, 8266402, 8349489, 8425870, 8495763, 8567334, 8646064, 8735518, 8835190, 8935453, 9020854, 9099467, 9182957, 9276211, 9364652, 9441650, 9513174, 9583451, 9656781, 9738017, 9829579, 9929908, 10021394, 10099456, 10177055, 10264714, 10356552, 10440692, 10517849, 10592486, 10666321, 10746655, 10839170, 10947146, 11047482, 11129239, 11207409, 11296323, 11391661, 11479294, 11557448, 11633820, 11708819, 11789193, 11881583, 11990945, 12092152, 12175146, 12253381, 12342258, 12435100, 12519133, 12594098, 12667636, 12738055, 12810065, 12890554, 12984124, 13082559, 13168785, 13245039, 13323321, 13410123, 13499515, 13581399, 13658916, 13731973, 13802292, 13876459, 13963549, 14059033, 14152865, 14232997, 14308421, 14384088, 14465157, 14546902, 14626024, 14700258, 14769399, 14836192, 14909552, 14993796, 15085084, 15180083, 15269248, 15347158, 15422824, 15506721, 15597406, 15683206, 15761563, 15836145, 15910973, 15993750, 16089132, 16194566, 16291557, 16372323, 16448764, 16530903, 16618631, 16702163, 16778071, 16850220, 16920916, 16994980, 17076976, 17170750, 17273202, 17364908, 17441941, 17520020, 
+
+};
 
 uint32_t last_time = 0;
 // PID control variables
@@ -144,7 +154,7 @@ void poll_sensor()
 
 int32_t get_total_sensor_angle()
 {
-    return last_sensor_angle + sensor_angle_wraps * MT6835_CPR;
+    return last_sensor_angle + sensor_angle_wraps * MT6835_CPR - sensor_angle_at_home;
 }
 
 
@@ -154,7 +164,7 @@ void writeFieldAngle(uint32_t angle)
 {
     // use integer angle directly corresponding to pwm value
     // Each quadrant has PWM_MAX_VALUE * 2 steps, full rotation has 4 quadrants
-    angle = angle % (PWM_MAX_VALUE * 8);
+    angle = (angle + field_angle_at_home) % (PWM_MAX_VALUE * 8);
 
     int32_t a_val = 0;
     int32_t b_val = 0;
@@ -281,6 +291,50 @@ uint32_t sensorAngleToFieldAngle(int32_t sensor_angle)
 }
 
 
+uint8_t home_rotation(){
+    // rotate until endstop is triggered, then set current angle as home (0)
+    uint32_t current_angle = 0;
+    uint8_t home_error = 0;
+    while (digitalRead(ROTATION_ENDSTOP) == HIGH)
+    {
+        if (current_angle > PWM_MAX_VALUE * 8 * 50) {
+            home_error = 1;
+            break;
+        }
+        writeFieldAngle(current_angle);
+        current_angle += 256;
+
+        delay(1);
+    }
+
+    if (home_error){
+        return 1;
+    }
+
+    while (digitalRead(ROTATION_ENDSTOP) == LOW)
+    {
+        writeFieldAngle(current_angle);
+        current_angle -= 10;
+
+        delay(1);
+    }
+
+    while (digitalRead(ROTATION_ENDSTOP) == HIGH)
+    {
+        writeFieldAngle(current_angle);
+        current_angle += 1;
+
+        delay(1);
+    }
+
+
+    field_angle_at_home = current_angle;
+    sensor_angle_wraps = 0;
+    sensor_angle_at_home = read_raw_angle();
+
+    return 0;
+}
+
 
 void setup()
 {
@@ -291,11 +345,12 @@ void setup()
     pinMode(SENSOR_SS, OUTPUT);
     digitalWrite(SENSOR_SS, HIGH);
 
+    pinMode(ROTATION_ENDSTOP, INPUT_FLOATING);
 
-    // Serial.println("Building angle lookup table...");
-    buildAngleLookupTable();
-    // Serial.println("Angle lookup table:");
-    printAngleLookupTable();
+    home_rotation();
+
+    // buildAngleLookupTable();
+    // printAngleLookupTable();
 }
 
 
@@ -398,16 +453,12 @@ void loop()
     writeFieldAngle(field_angle);
 
 
-    // Serial.println(get_total_sensor_angle());
-
-    
-    // delay(10);
     i += 1;
-    if (i >= 100)
+    if (i >= 500)
     {
         i = 0;
-        Serial.println(dt);
-        Serial.println(torque);
-        Serial.println((float)diff / MT6835_CPR * 360, 5);
+        // Serial.println(dt);
+        // Serial.println(torque);
+        // Serial.println((float)diff / MT6835_CPR * 360, 5);
     }
 }
