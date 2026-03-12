@@ -13,7 +13,23 @@ static SPISettings MT6835SPISettings(1000000, MSBFIRST, SPI_MODE3);
 int32_t last_sensor_angle = 0;
 int32_t sensor_angle_wraps = 0;
 
+/**
+ * I2C Communication
+ */
+TwoWire i2c_inst(I2C_SDA, I2C_SCL);
 
+uint8_t i2c_cursor = 0;
+
+uint8_t i2c_virtual_reg[256] = {0};
+uint8_t i2c_virtual_reg_cursor = 0;
+
+enum I2CStatus {
+    MODULE_UNINITIALIZED = 0,
+    MODULE_HOMING = 1,
+    MODULE_READY = 2,
+    MODULE_EMERGENCY_STOPPED = 3,
+    MODULE_ERROR = 4,
+};
 
 /**
  * Endstop & homing
@@ -38,6 +54,22 @@ int32_t last_diff = 0;
 float filtered_d_term = 0;
 
 int32_t target_sensor_angle = 0;
+
+
+
+
+
+
+// Vacuum runtime settings (tuneable by serial commands)
+uint16_t vac_pull_duty = (uint16_t)(VAC_PWM_MAX * 1.00f); // 100%
+uint16_t vac_hold_duty = (uint16_t)(VAC_PWM_MAX * 0.35f); // 35% default
+uint32_t vac_pull_ms   = 800;                             // pulldown duration then switch to hold
+
+enum VacMode : uint8_t { VAC_OFF=0, VAC_PULLDOWN=1, VAC_HOLD=2 };
+volatile VacMode vac_mode = VAC_OFF;
+uint32_t vac_mode_start_ms = 0;
+
+
 
 
 
@@ -177,23 +209,23 @@ void writeFieldAngle(uint32_t angle)
 
     if (a_val > 0)
     {
-        pwm_start(MOT_A_POS, PWM_FREQ, a_val, PWM_RESOLUTION);
-        pwm_start(MOT_A_NEG, PWM_FREQ, 0, PWM_RESOLUTION);
+        pwm_start(MOT_A_POS, PWM_FREQ, a_val, PWM_RES);
+        pwm_start(MOT_A_NEG, PWM_FREQ, 0, PWM_RES);
     }
     else
     {
-        pwm_start(MOT_A_POS, PWM_FREQ, 0, PWM_RESOLUTION);
-        pwm_start(MOT_A_NEG, PWM_FREQ, -a_val, PWM_RESOLUTION);
+        pwm_start(MOT_A_POS, PWM_FREQ, 0, PWM_RES);
+        pwm_start(MOT_A_NEG, PWM_FREQ, -a_val, PWM_RES);
     }
     if (b_val > 0)
     {
-        pwm_start(MOT_B_POS, PWM_FREQ, b_val, PWM_RESOLUTION);
-        pwm_start(MOT_B_NEG, PWM_FREQ, 0, PWM_RESOLUTION);
+        pwm_start(MOT_B_POS, PWM_FREQ, b_val, PWM_RES);
+        pwm_start(MOT_B_NEG, PWM_FREQ, 0, PWM_RES);
     }
     else
     {
-        pwm_start(MOT_B_POS, PWM_FREQ, 0, PWM_RESOLUTION);
-        pwm_start(MOT_B_NEG, PWM_FREQ, -b_val, PWM_RESOLUTION);
+        pwm_start(MOT_B_POS, PWM_FREQ, 0, PWM_RES);
+        pwm_start(MOT_B_NEG, PWM_FREQ, -b_val, PWM_RES);
     }
 }
 
@@ -304,10 +336,97 @@ uint8_t home_rotation(){
     return 0;
 }
 
+/**
+ * I2C protocol:
+ * 
+ * The first byte written is the cursor address.
+ * Any bytes after will write the register in increasing order.
+ * Example: 01 0A 0B 0C
+ * will write 0A to address 1, 0B to 2, 0C to 3.
+ * The cursor now stays at address 4.
+ * 
+ * Write one byte to place the cursor before read,
+ * same increasing order applies for reading.
+ */
+void on_i2c_receive(int num_bytes){
+    int i = 0;
+    while (i2c_inst.available()) {
+        char c = i2c_inst.read();
+        if (i == 0) {
+            // first byte is cursor address
+            i2c_virtual_reg_cursor = c;
+        } else {
+            // write to virtual register
+            i2c_virtual_reg[i2c_virtual_reg_cursor] = c;
+            i2c_virtual_reg_cursor += 1;
+        }
+
+        // add special checks here
+        // such as trigger registers
+
+
+
+        i += 1;
+    }
+}
+
+void on_i2c_request(){
+    i2c_inst.write(i2c_virtual_reg + i2c_virtual_reg_cursor, 256 - i2c_virtual_reg_cursor);
+}
+
+
+
+
+// -------------------- ADDED: Vacuum functions --------------------
+void vacuum_apply_pwm(uint16_t duty)
+{
+    duty = constrain(duty, 0, VAC_PWM_MAX - 1);
+    analogWrite(VAC_PWM_PIN, duty);
+}
+
+void vacuum_off()
+{
+    vac_mode = VAC_OFF;
+    vacuum_apply_pwm(0);
+}
+
+void vacuum_start_pulldown()
+{
+    vac_mode = VAC_PULLDOWN;
+    vac_mode_start_ms = millis();
+    vacuum_apply_pwm(vac_pull_duty);
+}
+
+void vacuum_hold()
+{
+    vac_mode = VAC_HOLD;
+    vacuum_apply_pwm(vac_hold_duty);
+}
+
+void vacuum_update()
+{
+    if (vac_mode == VAC_PULLDOWN)
+    {
+        if ((millis() - vac_mode_start_ms) >= vac_pull_ms)
+        {
+            vacuum_hold();
+        }
+    }
+}
+
+
+
 
 void setup()
 {
     Serial.begin(115200);
+    analogReadResolution(12);
+    analogWriteFrequency(PWM_FREQ);
+    analogWriteResolution(12);
+
+    i2c_inst.begin(10);
+    i2c_inst.onReceive(on_i2c_receive);
+    i2c_inst.onRequest(on_i2c_request);
 
 
     SensorSPI.begin();
@@ -315,6 +434,10 @@ void setup()
     digitalWrite(SENSOR_SS, HIGH);
 
     pinMode(ROTATION_ENDSTOP, INPUT_FLOATING);
+
+    pinMode(TEMP_SENSOR_PIN, INPUT);
+    pinMode(HEATER_PIN, OUTPUT);
+    analogWrite(HEATER_PIN, 0);
 
     home_rotation();
 
@@ -327,6 +450,8 @@ int i = 0;
 
 char input_buffer[16] = {0};
 uint16_t input_index = 0;
+
+float temp_roll_avg = 0;
 
 void loop()
 {
@@ -357,31 +482,68 @@ void loop()
         if (c == '\n')
         {
             input_buffer[input_index] = '\0';
-            // input in degree
-            // manual parse to avoid large size
-            int temp = 0;
-            for (int n = 0; n < input_index; n++)
+
+            // Minimal parsing
+            if (input_index >= 2 && input_buffer[0] == 'V')
             {
-                temp = temp * 10 + (input_buffer[n] - '0');
+                if (input_buffer[1] == '1')
+                {
+                    vacuum_start_pulldown();
+                }
+                else if (input_buffer[1] == '0')
+                {
+                    vacuum_off();
+                }
+                else if (input_buffer[1] == 'H')
+                {
+                    int pct = 0;
+                    for (int n = 2; n < (int)input_index; n++) pct = pct * 10 + (input_buffer[n] - '0');
+                    pct = constrain(pct, 0, 100);
+                    vac_hold_duty = (uint16_t)(VAC_PWM_MAX * (pct / 100.0f));
+                    if (vac_mode == VAC_HOLD) vacuum_apply_pwm(vac_hold_duty);
+                }
+                else if (input_buffer[1] == 'P')
+                {
+                    int pct = 0;
+                    for (int n = 2; n < (int)input_index; n++) pct = pct * 10 + (input_buffer[n] - '0');
+                    pct = constrain(pct, 0, 100);
+                    vac_pull_duty = (uint16_t)(VAC_PWM_MAX * (pct / 100.0f));
+                    if (vac_mode == VAC_PULLDOWN) vacuum_apply_pwm(vac_pull_duty);
+                }
+                else if (input_buffer[1] == 'T')
+                {
+                    int ms = 0;
+                    for (int n = 2; n < (int)input_index; n++) ms = ms * 10 + (input_buffer[n] - '0');
+                    vac_pull_ms = constrain(ms, 0, 10000);
+                }
+            } else {
+                // input in degree
+                // manual parse to avoid large size
+                int temp = 0;
+                for (int n = 0; n < input_index; n++)
+                {
+                    temp = temp * 10 + (input_buffer[n] - '0');
+                }
+                
+                float input_angle = temp / 100.0;
+    
+                float rad_angle = input_angle / 180.0 * PI;
+                while (rad_angle < 0)
+                {
+                    rad_angle += 2 * PI;
+                }
+                // convert using the lookup table to counter any magnetic non-linearity
+                // a full rotation is index 200
+                float index_float = rad_angle / (2 * PI) * 200;
+                uint32_t index = (uint32_t)(index_float);
+                float ratio = index_float - index;
+                index = index % 200;
+    
+                target_sensor_angle = angle_lookup_table[index] * (1 - ratio) + angle_lookup_table[(index + 1) % 200] * ratio;
             }
-            
-            float input_angle = temp / 100.0;
-
-            float rad_angle = input_angle / 180.0 * PI;
-            while (rad_angle < 0)
-            {
-                rad_angle += 2 * PI;
-            }
-            // convert using the lookup table to counter any magnetic non-linearity
-            // a full rotation is index 200
-            float index_float = rad_angle / (2 * PI) * 200;
-            uint32_t index = (uint32_t)(index_float);
-            float ratio = index_float - index;
-            index = index % 200;
-
-            target_sensor_angle = angle_lookup_table[index] * (1 - ratio) + angle_lookup_table[(index + 1) % 200] * ratio;
-
             input_index = 0;
+
+
         }
         else if (input_index < 15)
         {
@@ -429,5 +591,21 @@ void loop()
         // Serial.println(dt);
         // Serial.println(torque);
         // Serial.println((float)diff / MT6835_CPR * 360, 5);
+
+        // calc temperature
+        float V0c = 0.4; // 0C output is 400mV
+        float TC = 0.0195; // 19.5mV per degree C
+        float temp = (analogRead(TEMP_SENSOR_PIN) / 4095.0 * 3.3 - V0c) / TC;
+        Serial.print("Temperature: ");
+        Serial.print(temp);
+
+        temp_roll_avg = temp_roll_avg * 0.8 + temp * 0.2;
+        Serial.print("Avg: ");
+        Serial.println(temp_roll_avg);
+
+        // PID
+        float diff_temp = 60.0 - temp; // target temperature is 60C
+        float heater_power = diff_temp * 8; // P control only for heating, no cooling
+        analogWrite(HEATER_PIN, constrain(heater_power * PWM_MAX_VALUE, 0, PWM_MAX_VALUE-1));
     }
 }

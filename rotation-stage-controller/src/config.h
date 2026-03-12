@@ -60,4 +60,11 @@
 
 
 
+#define VAC_PWM_PIN  PB8          
+#define VAC_PWM_FREQ 25000       
+#define VAC_PWM_RES  RESOLUTION_12B_COMPARE_FORMAT
+#define VAC_PWM_MAX  PWM_MAX_VALUE
+
+
+
 #endif // CONFIG_H
