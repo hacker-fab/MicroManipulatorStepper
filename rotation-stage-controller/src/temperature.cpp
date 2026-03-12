@@ -13,6 +13,8 @@ int temperature_init(void){
     pinMode(TEMP_SENSOR_PIN, INPUT);
     pinMode(HEATER_PIN, OUTPUT);
     analogWrite(HEATER_PIN, 0);
+
+    return 0;
 }
 
 int temperature_poll(void){
@@ -29,6 +31,8 @@ int temperature_poll(void){
     float heater_power = diff_temp * temp_pid_p; // P control only for heating, no cooling
 
     analogWrite(HEATER_PIN, constrain(heater_power * PWM_MAX_VALUE, 0, PWM_MAX_VALUE-1));
+
+    return 0;
 }
 
 void temperature_set(float temp){
