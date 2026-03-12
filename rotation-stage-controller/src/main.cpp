@@ -4,6 +4,8 @@
 
 #include "config.h"
 
+#include "temperature.h"
+
 /**
  * MT6835 Sensor
  */
@@ -435,9 +437,7 @@ void setup()
 
     pinMode(ROTATION_ENDSTOP, INPUT_FLOATING);
 
-    pinMode(TEMP_SENSOR_PIN, INPUT);
-    pinMode(HEATER_PIN, OUTPUT);
-    analogWrite(HEATER_PIN, 0);
+    temperature_init();
 
     home_rotation();
 
@@ -451,7 +451,7 @@ int i = 0;
 char input_buffer[16] = {0};
 uint16_t input_index = 0;
 
-float temp_roll_avg = 0;
+
 
 void loop()
 {
@@ -469,11 +469,6 @@ void loop()
 
     // poll sensor and get angle
     poll_sensor();
-
-
-
-
-
 
 
     if (Serial.available() > 0)
@@ -585,27 +580,13 @@ void loop()
 
 
     i += 1;
-    if (i >= 500)
+    if (i >= 50)
     {
         i = 0;
         // Serial.println(dt);
         // Serial.println(torque);
         // Serial.println((float)diff / MT6835_CPR * 360, 5);
 
-        // calc temperature
-        float V0c = 0.4; // 0C output is 400mV
-        float TC = 0.0195; // 19.5mV per degree C
-        float temp = (analogRead(TEMP_SENSOR_PIN) / 4095.0 * 3.3 - V0c) / TC;
-        Serial.print("Temperature: ");
-        Serial.print(temp);
-
-        temp_roll_avg = temp_roll_avg * 0.8 + temp * 0.2;
-        Serial.print("Avg: ");
-        Serial.println(temp_roll_avg);
-
-        // PID
-        float diff_temp = 60.0 - temp; // target temperature is 60C
-        float heater_power = diff_temp * 8; // P control only for heating, no cooling
-        analogWrite(HEATER_PIN, constrain(heater_power * PWM_MAX_VALUE, 0, PWM_MAX_VALUE-1));
+        temperature_poll();
     }
 }
