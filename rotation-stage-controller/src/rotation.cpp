@@ -380,5 +380,5 @@ void rotation_set(float angle_rad){
 
 }
 float rotation_get(void){
-    return get_total_sensor_angle();
+    return get_total_sensor_angle() / (float)MT6835_CPR / 8 * 2 * PI;
 }
