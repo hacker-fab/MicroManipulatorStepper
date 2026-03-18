@@ -327,7 +327,12 @@ MT6835Encoder::AbsRawAngleType MT6835Encoder::update_abs_raw_angle(int32_t raw_a
       if (d > half_max) d -= MT6835_CPR;
       else if (d < -half_max) d += MT6835_CPR;
 
+
+      int32_t prev_val = abs_raw_angle;
       abs_raw_angle += d;
+      if (abs_raw_angle <0 && prev_val >0){
+        LOG_INFO("Possible overflow from %ld to %ld with incr %ld", prev_val, abs_raw_angle, d);
+      }
       last_raw_angle = raw_angle;
     }
 

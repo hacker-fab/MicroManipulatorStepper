@@ -44,7 +44,7 @@ Robot::Robot(float path_segment_time_step) :
   joints_spin_lock(spin_lock_instance(SPINLOCK_ID_JOINTS))
 {
   kinematic_model = new KinematicModel_Delta3D();
-  path_planner.set_kinematic_model(kinematic_model);
+  path_planner.set_kinematic_model(kinematic_model);  
 
   for(int i=0; i<NUM_JOINTS; i++)
     joints[i] = nullptr;

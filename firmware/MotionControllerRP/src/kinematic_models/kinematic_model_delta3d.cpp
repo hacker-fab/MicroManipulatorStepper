@@ -14,7 +14,7 @@
 
 //*** CLASS *****************************************************************************
 
-#define HW_VERSION4 // remove this if you are using HW-v3 (Note geometry parameters might be slightly off for HW-v3.0!)
+//#define HW_VERSION4 // remove this if you are using HW-v3 (Note geometry parameters might be slightly off for HW-v3.0!)
 
 #ifdef HW_VERSION4
 

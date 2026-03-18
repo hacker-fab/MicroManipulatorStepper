@@ -59,7 +59,7 @@ bool measure_calibration_data(
         weak_field_measurements++;
  
       if(print_measurements)
-        LOG_RAW("%15.10f, %15.10f, %f", motor_pos, field_angle, encoder_angle_raw);
+        LOG_RAW("%15.10f, %15.10f, %f, %d", motor_pos, field_angle, encoder_angle_raw, encoder.get_status() & MT6835_STATUS_WEAKFIELD);
 
       encoder_angle_and_motor_pos.push_back({encoder_angle_raw, motor_pos});
       motor_pos_and_field_angle.push_back({motor_pos, field_angle});

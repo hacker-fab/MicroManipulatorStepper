@@ -27,7 +27,7 @@ constexpr float ENCODER_ANGLE_TO_ROTOR_ANGLE = (ENCODER_MAGNET_PITCH*2.0f) /
 											   
 // enables error checking for encoders (slow) - useful for debugging
 // Note: some chips seem to return always a crc of 0 producing massiv false errors       
-constexpr bool ENABLE_ENCODER_CRC = true;
+constexpr bool ENABLE_ENCODER_CRC = false;
 
 //--- HOMING ------------------------------------------------------------------
 
@@ -38,7 +38,7 @@ constexpr float HOMING_CURRENT    = 0.15f;       // range 0..1
 //--- CALIBRATION -------------------------------------------------------------
 
 // degrees from home position
-constexpr float CALIBRATION_RANGE = 75; 
+constexpr float CALIBRATION_RANGE = 50; 
 
 // velocity of the magnetic field during calibration (lower is more accurate)
 constexpr float CALIBRATION_FIELD_VELOCITY = 20.0f; 
