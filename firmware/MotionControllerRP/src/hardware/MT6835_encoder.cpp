@@ -8,6 +8,7 @@
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
 #include "utilities/logging.h"
+#include <hw_config.h>
 
 void MT6835Encoder::setup_spi(spi_inst_t* spi, uint pin_sck, uint pin_mosi, uint pin_miso, int32_t baudrate_hz) {
   // Set GPIO functions to SPI
@@ -96,6 +97,11 @@ MT6835Encoder::AbsRawAngleType MT6835Encoder::read_abs_angle_raw() {
   last_status = data[4] & 0x07;
   last_crc = data[5];
   int32_t raw_angle = ((int32_t)data[2] << 13) | ((int32_t)data[3] << 5) | (data[4] >> 3);
+
+
+  if(cs_pin == PIN_ENCODER1_CS){
+    //LOG_INFO("Raw angle from encoder_1: %ld", raw_angle);
+  }
   
   if (check_crc) {
       if (last_crc != calc_crc(raw_angle, last_status)) {

@@ -32,13 +32,13 @@ constexpr bool ENABLE_ENCODER_CRC = false;
 //--- HOMING ------------------------------------------------------------------
 
 constexpr float HOMING_VELOCITY   = 1.0f;        // rad per s
-constexpr float HOMING_CURRENT    = 0.15f;       // range 0..1
+constexpr float HOMING_CURRENT    = 0.5f;       // range 0..1
 // NOT IMPLEMENTED YET: constexpr float HOMING_FINISH_POS = 0.5f;        // in rad
 
 //--- CALIBRATION -------------------------------------------------------------
 
 // degrees from home position
-constexpr float CALIBRATION_RANGE = 50; 
+constexpr float CALIBRATION_RANGE = 75; 
 
 // velocity of the magnetic field during calibration (lower is more accurate)
 constexpr float CALIBRATION_FIELD_VELOCITY = 20.0f; 

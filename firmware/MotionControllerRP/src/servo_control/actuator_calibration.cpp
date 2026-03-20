@@ -54,9 +54,10 @@ bool measure_calibration_data(
       float field_angle = motor_driver.get_field_angle();
       float motor_pos = (field_angle-start_field_angle)/pole_pair_count;
       // TODO: read motor_pos from precise reference encoder
-  
-      if(encoder.get_status() & MT6835_STATUS_WEAKFIELD)
-        weak_field_measurements++;
+      
+      // don't care about weak fields for now
+      //if(encoder.get_status() & MT6835_STATUS_WEAKFIELD)
+      //  weak_field_measurements++;
  
       if(print_measurements)
         LOG_RAW("%15.10f, %15.10f, %f, %d", motor_pos, field_angle, encoder_angle_raw, encoder.get_status() & MT6835_STATUS_WEAKFIELD);

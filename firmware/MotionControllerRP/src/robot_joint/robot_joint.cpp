@@ -135,5 +135,5 @@ bool RobotJoint::store_calibration() {
 }
 
 std::string RobotJoint::calib_data_filename(std::string data_name) const {
-  return std::string("joint")+std::to_string(joint_idx)+"_"+data_name+".dat";
+  return std::string("joint_")+std::to_string(joint_idx)+"_"+data_name+".dat";
 }

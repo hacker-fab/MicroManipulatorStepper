@@ -203,11 +203,11 @@ class MT6835Encoder {
       bool write_eeprom();  // takes ~6s to complete after calling
 
       bool check_crc = false;
-
+      int32_t cs_pin;
   private:
       bool initialized=false;
       spi_inst_t *spi;
-      int32_t cs_pin;
+      
       uint8_t last_status = 0;
       uint8_t last_crc = 0;
       uint32_t crc_error_count = 0;

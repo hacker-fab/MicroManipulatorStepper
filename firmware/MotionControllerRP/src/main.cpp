@@ -147,8 +147,19 @@ void setup() {
     LittleFS.info(fs_info);
     LOG_INFO("Mounting filesystem successfully [%i/%i bytes used]", 
              (int)fs_info.usedBytes, (int)fs_info.totalBytes);
+  } 
+
+  /*
+  LookupTable enc_to_pos_lut;
+  bool res = true; 
+  res &= load_lut_from_file(enc_to_pos_lut, "joint_0_pos_to_field_lut.dat");
+  for(uint32_t i=0; i<enc_to_pos_lut.size(); i++) {
+    float v = enc_to_pos_lut.get_entry(i);
+    Serial.printf("%i, %d\n", i, int(v*1000));
   }
 
+    // Close files
+  Serial.println("File print complete");*/
   LOG_INFO("Initializing device...");
   robot.init();
 

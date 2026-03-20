@@ -130,7 +130,7 @@ void HomingController::on_endstop_detected() {
   home_encoder_angle = encoder.read_abs_angle();
   LOG_DEBUG("home_encoder_angle=%f deg", home_encoder_angle*Constants::RAD2DEG);
   if(home_encoder_angle < Constants::TWO_PI_F*0.01 || home_encoder_angle > Constants::TWO_PI_F*0.99)
-    LOG_WARNING("encoder angle at home position close to wrap around point !");
+    LOG_WARNING("encoder angle for %d at home position close to wrap around point !", encoder.cs_pin);
 }
 
 void HomingController::finalize() {
