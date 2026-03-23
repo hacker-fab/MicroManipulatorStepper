@@ -5,7 +5,7 @@
 
 HomingController::HomingController() {
   retract_field_velocity = 100.0f; // rad per second
-  retract_field_angle = Constants::TWO_PI_F*0.25f;
+  retract_field_angle = Constants::TWO_PI_F*2.0f;
 }
 
 bool HomingController::run_blocking(ServoController* servo_controller, 

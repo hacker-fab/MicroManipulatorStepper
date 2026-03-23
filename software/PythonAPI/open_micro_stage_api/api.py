@@ -311,7 +311,7 @@ class OpenMicroStageInterface:
         """
         axis_chars = ["A", "B", "C", "D", "E", "F"]
         if axis_list is None:
-            axis_list = list(range(len(axis_chars)))
+            axis_list = [0, 1, 2]
 
         # Home one axis at a time
         for axis_idx in axis_list:
