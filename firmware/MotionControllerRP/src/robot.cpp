@@ -73,7 +73,7 @@ Robot::~Robot() {
 }
 
 void Robot::init() {
-  MT6835Encoder::setup_spi(spi0, PIN_ENCODER_SCK, PIN_ENCODER_MOSI, PIN_ENCODER_MISO, 4000000);
+  MT6835Encoder::setup_spi(spi0, PIN_ENCODER_SCK, PIN_ENCODER_MOSI, PIN_ENCODER_MISO, 1000000);
 
   // axis 1
   {

@@ -41,7 +41,8 @@ camera_comparer = [
 image_comparer = [
     "typer",
     "opencv-python",
-    "numpy"
+    "numpy",
+    "openpyxl",
 ]
 
 [project.urls]

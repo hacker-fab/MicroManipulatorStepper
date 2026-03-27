@@ -2,10 +2,11 @@
 #include "utilities/math_constants.h"
 #include "utilities/logging.h"
 #include "pico/time.h"
+#include <hw_config.h>
 
 HomingController::HomingController() {
   retract_field_velocity = 100.0f; // rad per second
-  retract_field_angle = Constants::TWO_PI_F*2.0f;
+  retract_field_angle = Constants::TWO_PI_F*HOMING_RETRACTION_FIELD_ANGLE;
 }
 
 bool HomingController::run_blocking(ServoController* servo_controller, 
