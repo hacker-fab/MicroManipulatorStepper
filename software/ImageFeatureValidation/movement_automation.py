@@ -127,14 +127,16 @@ def load_relative_points(csv_file):
     Load relative x,y points from a CSV file.
     
     Expected CSV format (with or without header):
-        x,y,feed
+        x,y,feed[,delay]
         0,0,100
         1,0,100
-        1,1,100
+        1,1,100,0.8
         ...
     
+    The delay column is optional. If not provided, None is returned and the default delay is used.
+    
     :param csv_file: Path to the CSV file
-    :return: List of tuples [(x, y, feed), ...]
+    :return: List of tuples [(x, y, feed, delay_or_none), ...]
     """
     points = []
     try:
@@ -144,8 +146,10 @@ def load_relative_points(csv_file):
             first_row = next(reader)
             try:
                 # Try to parse as floats
-                x, y, feed = map(float, first_row)
-                points.append((x, y, feed))
+                x, y, feed = map(float, first_row[:3])
+                # Optional delay column
+                delay = float(first_row[3]) if len(first_row) > 3 else None
+                points.append((x, y, feed, delay))
             except ValueError:
                 # First row is header, skip it
                 pass
@@ -155,7 +159,9 @@ def load_relative_points(csv_file):
                 if len(row) >= 3:
                     try:
                         x, y, feed = map(float, row[:3])
-                        points.append((x, y, feed))
+                        # Optional delay column
+                        delay = float(row[3]) if len(row) > 3 else None
+                        points.append((x, y, feed, delay))
                     except ValueError:
                         print(f"Warning: Skipping invalid row: {row}")
                         continue
@@ -182,12 +188,14 @@ def main(
     """Move OpenMicroStageInterface stage in a pattern and capture images.
     
     Args:
-        csv_file: CSV file with relative x,y coordinates and feed rate (x,y,feed per row).
+        csv_file: CSV file with relative x,y coordinates, feed rate, and optional per-line delay.
+                 Format: x,y,feed[,delay]
         output: Output folder for images. Defaults to "captures".
         com_port: Serial port for OpenMicroStageInterface. Defaults to "COM5".
         baud_rate: Baud rate for serial connection. Defaults to 921600.
         camera_index: Index of Basler camera to use. Defaults to 0.
-        delay: Delay in seconds between moves and captures. Defaults to 0.5.
+        delay: Default delay in seconds between moves and captures. Defaults to 0.5.
+               Can be overridden per-line via 4th CSV column.
         screenshots: Number of screenshots to take at each location. Defaults to 1.
         show_communication: Show OpenMicroStageInterface communication messages. Defaults to False.
         show_logs: Show OpenMicroStageInterface log messages. Defaults to False.
@@ -197,6 +205,7 @@ def main(
     2. Prompt for starting X,Y,Z position
     3. Move through each point keeping Z constant
     4. Capture images at each location in folder structure: idx_startx_starty_endx_endy
+    5. Use per-line delay from CSV if provided, otherwise use default delay parameter
     """
 
     # Create output directory
@@ -278,7 +287,10 @@ def main(
         prev_x, prev_y = x_start, y_start
         
         # Move through each relative point and capture images
-        for idx, (rel_x, rel_y, feed) in enumerate(relative_points):
+        for idx, (rel_x, rel_y, feed, line_delay) in enumerate(relative_points):
+            # Use per-line delay if provided, otherwise use default
+            current_delay = line_delay if line_delay is not None else delay
+            
             # Calculate absolute position (XY only, keep Z constant)
             abs_x = x_start + rel_x
             abs_y = y_start + rel_y
@@ -308,7 +320,7 @@ def main(
             
             # Capture multiple images distributed over the delay period
             if screenshots > 1:
-                interval = delay / (screenshots-1)
+                interval = current_delay / (screenshots-1)
                 for shot in range(screenshots-1):
                     # Wait before capturing
                     time.sleep(interval)
@@ -333,7 +345,7 @@ def main(
                     print(f"  Captured: {folder_name}/{filename}")
             else:
                 # Single screenshot - wait for full delay then capture
-                time.sleep(delay)
+                time.sleep(current_delay)
                 
                 frame = camera.capture_image()
                 if frame is not None:
