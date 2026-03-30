@@ -39,6 +39,10 @@ void HomingController::start(ServoController* servo_controller,
 
   if(retract_angle_rad > 0.0f)
     HomingController::retract_field_angle = retract_angle_rad * pole_pair_count;
+  else if (servo_controller->get_encoder().cs_pin == PIN_ENCODER3_CS) {
+    // for the 3rd motor, which is used in the z axis and has a different end stop, use a smaller retract angle to avoid hitting the end stop again
+    HomingController::retract_field_angle = Constants::TWO_PI_F*HOMING_RETRACTION_Z_FIELD_ANGLE;
+  }
 
   // field_angle_to_rotor_angle = 1.0 / pole_pair_count
   // encoder_angle_to_rotor_angle = encoder_period_pitch/encoder_radius
