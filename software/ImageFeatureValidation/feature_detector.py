@@ -1,6 +1,7 @@
 import csv
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openpyxl import Workbook, load_workbook
 from dataclasses import dataclass, asdict, fields
 from typer import Typer
@@ -14,6 +15,7 @@ DEFAULT_MATCH_LIMIT = 0.8
 DEFAULT_RANSAC_THRESHOLD = 5
 MAX_WIDTH = 1600
 MAX_HEIGHT = 900
+PROGRESS_CSV = Path("progress.csv")
 DEFAULT_PIXEL_UM = 0.6209
 DEFAULT_CAMERA_HEIGHT_UM = 1500.0   # height of camera above the plane (in µm)
 DEFAULT_FOV_DEG = 60.0              # diagonal field of view in degrees
@@ -858,6 +860,212 @@ def calculate_xy_distance(pos1: FolderInfo, pos2: FolderInfo) -> float:
     return np.sqrt(dx**2 + dy**2)
 
 
+def compare_image_pair(img1_path, img2_path, match_limit, camera_height_um, fov_deg, pixel_to_um):
+    """
+    Helper function to compare a pair of images.
+    
+    Returns tuple of (success: bool, distance: float or None)
+    """
+    try:
+        img1, img2, kp1, kp2, matches, T, K1, K2 = compare_images(
+            img1_path, img2_path, match_limit, camera_height_um, fov_deg, pixel_to_um
+        )
+        (tx, ty, tz), yaw = decompose_transform(T, pixel_to_um)
+        # Calculate actual distance (XY only)
+        distance = np.sqrt(tx**2 + ty**2)
+        return True, distance
+    except Exception as e:
+        return False, None
+
+
+def compare_image_pair_for_variation(img1_path, img2_path, match_limit, camera_height_um, fov_deg, pixel_to_um):
+    """
+    Helper function to compare a pair of images for variation analysis.
+    
+    Returns tuple of (success: bool, tx: float, ty: float, xy_movement: float)
+    """
+    try:
+        img1, img2, kp1, kp2, matches, T, K1, K2 = compare_images(
+            img1_path, img2_path, match_limit, camera_height_um, fov_deg, pixel_to_um
+        )
+        (tx, ty, tz), yaw = decompose_transform(T, pixel_to_um)
+        xy_movement = np.sqrt(tx**2 + ty**2)  # Only XY movement
+        return True, tx, ty, xy_movement
+    except Exception as e:
+        return False, None, None, None
+
+
+def load_progress(progress_file: Path) -> set[str]:
+    """
+    Load already-processed movements from progress CSV.
+    Returns a set of "start_idx,end_idx" strings that have been processed.
+    """
+    processed = set()
+    if progress_file.exists():
+        try:
+            with open(progress_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row and 'movement_id' in row:
+                        processed.add(row['movement_id'])
+        except Exception as e:
+            print(f"Warning: Could not load progress file: {e}")
+    return processed
+
+
+def save_progress(progress_file: Path, processed_movements: list[tuple[int, int]]):
+    """
+    Save processed movements to progress CSV.
+    Appends to existing file if it exists.
+    """
+    file_exists = progress_file.exists()
+    try:
+        with open(progress_file, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['movement_id', 'timestamp'])
+            if not file_exists:
+                writer.writeheader()
+            for start_idx, end_idx in processed_movements:
+                writer.writerow({
+                    'movement_id': f"{start_idx},{end_idx}",
+                    'timestamp': datetime.now().isoformat()
+                })
+    except Exception as e:
+        print(f"Warning: Could not save progress: {e}")
+
+
+def load_variation_progress(progress_file: Path) -> set[str]:
+    """
+    Load already-processed endpoints from progress CSV (variation section).
+    Returns a set of endpoint strings that have been processed.
+    """
+    processed = set()
+    if progress_file.exists():
+        try:
+            with open(progress_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row and 'endpoint_id' in row:
+                        processed.add(row['endpoint_id'])
+        except Exception as e:
+            print(f"Warning: Could not load variation progress: {e}")
+    return processed
+
+
+def save_variation_progress(progress_file: Path, processed_endpoints: list[str]):
+    """
+    Save processed endpoints to variation progress CSV.
+    Appends to existing file if it exists.
+    """
+    file_exists = progress_file.exists()
+    try:
+        with open(progress_file, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['endpoint_id', 'timestamp'])
+            if not file_exists:
+                writer.writeheader()
+            for endpoint_id in processed_endpoints:
+                writer.writerow({
+                    'endpoint_id': endpoint_id,
+                    'timestamp': datetime.now().isoformat()
+                })
+    except Exception as e:
+        print(f"Warning: Could not save variation progress: {e}")
+
+
+def load_movement_results(results_file: Path) -> list[MovementResult]:
+    """
+    Load previously saved movement results from CSV.
+    Returns a list of MovementResult dataclass instances.
+    """
+    results = []
+    if results_file.exists():
+        try:
+            with open(results_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row:
+                        result = MovementResult(
+                            from_position=row['from_position'],
+                            to_position=row['to_position'],
+                            expected_distance_um=float(row['expected_distance_um']),
+                            actual_distance_um=float(row['actual_distance_um']),
+                            difference_um=float(row['difference_um']),
+                            feed=float(row.get('feed', 0.0)),
+                        )
+                        results.append(result)
+        except Exception as e:
+            print(f"Warning: Could not load movement results: {e}")
+    return results
+
+
+def save_movement_result(results_file: Path, result: MovementResult):
+    """
+    Save a single movement result to the results CSV.
+    Creates file and writes header if it doesn't exist.
+    Appends the result to the file.
+    """
+    file_exists = results_file.exists()
+    try:
+        with open(results_file, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'from_position', 'to_position', 'expected_distance_um',
+                'actual_distance_um', 'difference_um', 'feed'
+            ])
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(asdict(result))
+    except Exception as e:
+        print(f"Warning: Could not save movement result: {e}")
+
+
+def load_image_variation_results(results_file: Path) -> list[ImageVariationResult]:
+    """
+    Load previously saved image variation results from CSV.
+    Returns a list of ImageVariationResult dataclass instances.
+    """
+    results = []
+    if results_file.exists():
+        try:
+            with open(results_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row:
+                        result = ImageVariationResult(
+                            endpoint=row['endpoint'],
+                            num_visits=int(row['num_visits']),
+                            num_image_pairs=int(row['num_image_pairs']),
+                            mean_tx_um=float(row['mean_tx_um']),
+                            std_tx_um=float(row['std_tx_um']),
+                            mean_ty_um=float(row['mean_ty_um']),
+                            std_ty_um=float(row['std_ty_um']),
+                            mean_total_xy_movement_um=float(row['mean_total_xy_movement_um']),
+                        )
+                        results.append(result)
+        except Exception as e:
+            print(f"Warning: Could not load image variation results: {e}")
+    return results
+
+
+def save_image_variation_result(results_file: Path, result: ImageVariationResult):
+    """
+    Save a single image variation result to the results CSV.
+    Creates file and writes header if it doesn't exist.
+    Appends the result to the file.
+    """
+    file_exists = results_file.exists()
+    try:
+        with open(results_file, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'endpoint', 'num_visits', 'num_image_pairs',
+                'mean_tx_um', 'std_tx_um', 'mean_ty_um', 'std_ty_um',
+                'mean_total_xy_movement_um'
+            ])
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(asdict(result))
+    except Exception as e:
+        print(f"Warning: Could not save image variation result: {e}")
+
+
 @APP.command()
 def analyze_movements(
     root_dir: Path,
@@ -866,6 +1074,7 @@ def analyze_movements(
     camera_height_um: float = DEFAULT_CAMERA_HEIGHT_UM,
     fov_deg: float = DEFAULT_FOV_DEG,
     match_limit: float = DEFAULT_MATCH_LIMIT,
+    num_threads: int = 5,
 ):
     """
     Analyze movement accuracy by reading indexed image folders and CSV metadata.
@@ -882,6 +1091,7 @@ def analyze_movements(
         camera_height_um: Camera height in µm
         fov_deg: Field of view in degrees
         match_limit: SIFT feature match threshold
+        num_threads: Number of threads to use for parallel image comparison (default: 5)
     """
     root_dir = Path(root_dir)
     
@@ -935,7 +1145,20 @@ def analyze_movements(
     
     image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff'}
     
+    # Load progress for movements
+    progress_file = root_dir / PROGRESS_CSV
+    results_file = root_dir / "movement_results.csv"
+    processed_movements = load_progress(progress_file)
+    existing_results = load_movement_results(results_file)
+    
     for start_idx, end_idx, expected_distance_mm, feed in movements:
+        movement_id = f"{start_idx},{end_idx}"
+        
+        # Skip if already processed
+        if movement_id in processed_movements:
+            print(f"  [{start_idx} → {end_idx}] Already processed, skipping")
+            continue
+        
         # Convert expected distance from mm to µm
         expected_distance_um = expected_distance_mm * 1000 if expected_distance_mm is not None else None
         
@@ -959,19 +1182,28 @@ def analyze_movements(
             actual_distances = []
             failed_comparisons = 0
             
+            # Create list of all image pairs to compare
+            image_pairs = []
             for img1_path in images1:
                 for img2_path in images2:
-                    try:
-                        img1, img2, kp1, kp2, matches, T, K1, K2 = compare_images(
-                            img1_path, img2_path, match_limit, camera_height_um, fov_deg, pixel_to_um
-                        )
-                        (tx, ty, tz), yaw = decompose_transform(T, pixel_to_um)
-                        # Calculate actual distance (XY only)
-                        distance = np.sqrt(tx**2 + ty**2)
+                    image_pairs.append((img1_path, img2_path))
+            
+            # Use ThreadPoolExecutor to compare images in parallel
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = {
+                    executor.submit(
+                        compare_image_pair, 
+                        img1_path, img2_path, match_limit, camera_height_um, fov_deg, pixel_to_um
+                    ): (img1_path, img2_path) 
+                    for img1_path, img2_path in image_pairs
+                }
+                
+                for future in as_completed(futures):
+                    success, distance = future.result()
+                    if success:
                         actual_distances.append(distance)
-                    except Exception as e:
+                    else:
                         failed_comparisons += 1
-                        continue
             
             if not actual_distances:
                 print(f"  [{start_idx} → {end_idx}] Failed: no successful image comparisons")
@@ -999,6 +1231,11 @@ def analyze_movements(
             )
             movement_results.append(result)
             
+            # Save result immediately
+            save_movement_result(results_file, result)
+            # Update progress after successful completion
+            save_progress(progress_file, [(start_idx, end_idx)])
+            
             print(f"  [{start_idx} → {end_idx}]")
             print(f"    Expected: {expected_distance_um:7.1f} µm")
             print(f"    Actual:   {actual_distance:7.1f} µm")
@@ -1008,6 +1245,9 @@ def analyze_movements(
         except Exception as e:
             print(f"  [{start_idx} → {end_idx}] Failed: {e}")
             continue
+    
+    # Load any previously saved results to include in Excel
+    movement_results.extend(existing_results)
     
     if not movement_results:
         print("No valid movement comparisons found!")
@@ -1057,6 +1297,12 @@ def analyze_movements(
     image_variations: list[ImageVariationResult] = []
     endpoints_to_indices: dict[tuple, list[int]] = {}
     
+    # Load progress for endpoints
+    variation_progress_file = root_dir / "variation_progress.csv"
+    variation_results_file = root_dir / "image_variation_results.csv"
+    processed_endpoints = load_variation_progress(variation_progress_file)
+    existing_variation_results = load_image_variation_results(variation_results_file)
+    
     # Group indices by their rounded endpoint
     for idx, (x, y) in idx_to_coord.items():
         rounded_ep = round_endpoint(x, y)
@@ -1066,6 +1312,16 @@ def analyze_movements(
     
     # Analyze variations for endpoints with multiple visits
     for endpoint, idx_list in sorted(endpoints_to_indices.items()):
+        if len(idx_list) < 2:
+            continue  # Skip endpoints with only one visit
+        
+        rounded_x, rounded_y = endpoint
+        endpoint_str = f"({rounded_x:.9f},{rounded_y:.9f})"
+        
+        # Skip if already processed
+        if endpoint_str in processed_endpoints:
+            print(f"\n  Endpoint {endpoint_str}: Already processed, skipping")
+            continue
         if len(idx_list) < 2:
             continue  # Skip endpoints with only one visit
         
@@ -1088,6 +1344,8 @@ def analyze_movements(
         all_comparisons = []
         idx_list_with_images = list(all_images_by_idx.keys())
         
+        # Collect all image pairs to compare
+        image_pairs_to_compare = []
         for i in range(len(idx_list_with_images)):
             for j in range(i + 1, len(idx_list_with_images)):
                 idx_i = idx_list_with_images[i]
@@ -1096,23 +1354,29 @@ def analyze_movements(
                 images_i = all_images_by_idx[idx_i]
                 images_j = all_images_by_idx[idx_j]
                 
-                # Compare all image pairs between these two visits
+                # Add all image pairs between these two visits
                 for img_i in images_i:
                     for img_j in images_j:
-                        try:
-                            img1, img2, kp1, kp2, matches, T, K1, K2 = compare_images(
-                                img_i, img_j, match_limit, camera_height_um, fov_deg, pixel_to_um
-                            )
-                            (tx, ty, tz), yaw = decompose_transform(T, pixel_to_um)
-                            xy_movement = np.sqrt(tx**2 + ty**2)  # Only XY movement
-                            
-                            all_comparisons.append({
-                                'tx': tx,
-                                'ty': ty,
-                                'xy_movement': xy_movement,
-                            })
-                        except Exception as e:
-                            continue
+                        image_pairs_to_compare.append((img_i, img_j))
+        
+        # Compare all image pairs in parallel using thread pool
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = {
+                executor.submit(
+                    compare_image_pair_for_variation,
+                    img_i, img_j, match_limit, camera_height_um, fov_deg, pixel_to_um
+                ): (img_i, img_j)
+                for img_i, img_j in image_pairs_to_compare
+            }
+            
+            for future in as_completed(futures):
+                success, tx, ty, xy_movement = future.result()
+                if success:
+                    all_comparisons.append({
+                        'tx': tx,
+                        'ty': ty,
+                        'xy_movement': xy_movement,
+                    })
         
         if all_comparisons:
             # Calculate statistics (XY only, ignoring Z and rotation)
@@ -1132,10 +1396,23 @@ def analyze_movements(
             )
             image_variations.append(result)
             
+            # Save result immediately
+            save_image_variation_result(variation_results_file, result)
+            # Update progress after successful completion
+            save_variation_progress(variation_progress_file, [endpoint_str])
+            
             print(f"    Compared {len(all_comparisons)} image pairs")
             print(f"    TX variation: {np.mean(tx_values):+7.2f} ± {np.std(tx_values):6.2f} µm")
             print(f"    TY variation: {np.mean(ty_values):+7.2f} ± {np.std(ty_values):6.2f} µm")
             print(f"    XY movement: {np.mean(xy_movement_values):7.2f} ± {np.std(xy_movement_values):6.2f} µm")
+    
+    # Load any previously saved variation results to include in Excel
+    image_variations.extend(existing_variation_results)
+    # Remove duplicates (keep latest version of each endpoint)
+    seen = {}
+    for result in image_variations:
+        seen[result.endpoint] = result
+    image_variations = list(seen.values())
     
     # Write Excel output if requested
     if excel_output:

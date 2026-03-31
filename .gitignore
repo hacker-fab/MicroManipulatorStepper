@@ -218,3 +218,4 @@ __marimo__/
 # Ignore all .png files in the software/imagefeaturevalidation directory
 software/ImageFeatureValidation/**/*.png
 software/ImageFeatureValidation/**/*.xlsx
+software/ImageFeatureValidation/**/*.avi

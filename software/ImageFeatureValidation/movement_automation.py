@@ -284,7 +284,7 @@ def take_screenshots(camera: BaslerCamera, delay: float, screenshots: int, folde
             print(f"  Error: Failed to capture image")
 
 @app.command()
-def visualize_path(csv_file: str) -> None:
+def visualize_path(csv_file: str, output_file: Path = Path("movement_path_visualization.png")) -> None:
     """Visualize the movement path from a CSV file.
     
     Args:
@@ -346,7 +346,6 @@ def visualize_path(csv_file: str) -> None:
             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
     
     # Save figure to file
-    output_file = Path("movement_path_visualization.png")
     plt.savefig(str(output_file), dpi=150, bbox_inches='tight')
     plt.close()
     
@@ -558,6 +557,100 @@ def main(
         print("\n\nInterrupted by user")
     except Exception as e:
         print(f"\nError during operation: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        print("\nCleaning up...")
+        feed_display.stop()
+        camera.close()
+        oms.disconnect()
+        print("Done")
+
+
+@app.command()
+def control(
+    com_port: str = "COM5",
+    baud_rate: int = 921600,
+    camera_index: int = 0,
+    show_communication: bool = False,
+    show_logs: bool = False,
+) -> None:
+    """Interactive stage control with live camera feed.
+    
+    Allows manual control of the stage with homing option and real-time camera view.
+    No CSV file or test functions required.
+    
+    Args:
+        com_port: Serial port for OpenMicroStageInterface. Defaults to "COM5".
+        baud_rate: Baud rate for serial connection. Defaults to 921600.
+        camera_index: Index of Basler camera to use. Defaults to 0.
+        show_communication: Show OpenMicroStageInterface communication messages. Defaults to False.
+        show_logs: Show OpenMicroStageInterface log messages. Defaults to False.
+    """
+
+    # Initialize OpenMicroStageInterface
+    print(f"Initializing OpenMicroStageInterface on {com_port}...")
+    oms = OpenMicroStageInterface(
+        show_communication=show_communication,
+        show_log_messages=show_logs
+    )
+    oms.connect(com_port, baud_rate)
+
+    if oms.serial is None:
+        print("Error: Failed to connect to OpenMicroStageInterface")
+        return
+
+    # Initialize camera
+    print(f"\nInitializing Basler camera (index {camera_index})...")
+    camera = BaslerCamera(camera_index)
+    if not camera.open():
+        print("Error: Failed to open camera")
+        oms.disconnect()
+        return
+
+    # Initialize camera feed display
+    print("Starting live camera feed display...")
+    feed_display = CameraFeedDisplay(camera, "Camera Feed - Press 'q' to close window")
+    feed_display.start()
+
+    try:
+        # Prompt to home the stage
+        print("\nWould you like to home the stage first?")
+        home_response = input("Press 'h' to home or any other key to skip: ").strip().lower()
+        if home_response == 'h':
+            print("Homing stage...")
+            oms.home()
+            print("Stage homed successfully!")
+        
+        # Get or set starting position
+        while True:
+            try:
+                x, y, z = oms.read_current_position()
+                print(f"\nCurrent position -> X:{x:.4f}, Y:{y:.4f}, Z:{z:.4f}")
+
+                user_input = input("Enter target X,Y,Z (or 'q' to quit):")
+
+                if user_input.lower() == 'q':
+                    break
+                if("+" in user_input):
+                    user_input = user_input.replace("+", ",")
+                x_str, y_str, z_str = user_input.split(',')
+                x_target = float(x_str.strip())
+                y_target = float(y_str.strip())
+                z_target = float(z_str.strip())
+
+                print(f"Moving to X:{x_target}, Y:{y_target}, Z:{z_target}")
+                oms.set_pose(x_target, y_target, z_target)
+                oms.wait_for_stop()
+
+            except ValueError:
+                print("Invalid input. Use format: X,Y,Z or X+Y+Z")
+            except KeyboardInterrupt:
+                print("\nExiting control mode.")
+                break
+    
+    except Exception as e:
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()
     finally:
