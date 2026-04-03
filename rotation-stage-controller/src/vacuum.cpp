@@ -13,7 +13,7 @@ void vacuum_init(){
 
 void vacuum_set(uint16_t duty){
     vacuum_state = duty;
-    digitalWrite(VAC_PWM_PIN, duty > 0);
+    analogWrite(VAC_PWM_PIN, duty * VAC_PWM_MAX / 100);
 }
 uint16_t vacuum_get(void) {
     return vacuum_state;

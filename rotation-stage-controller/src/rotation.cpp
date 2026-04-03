@@ -41,7 +41,7 @@ static int32_t last_diff = 0;
 static float filtered_d_term = 0;
 
 static int32_t target_sensor_angle = 0;
-
+static float target_angle_rad = 0; // only for the getter function, not used for control
 
 
 static uint8_t calc_crc(uint32_t angle, uint8_t status) {
@@ -368,6 +368,8 @@ int rotation_poll(uint32_t dt_us){
 }
 
 void rotation_set(float angle_rad){
+    target_angle_rad = angle_rad;
+
     // the hardware only support -90 to 270 degrees
     // map the rotation to that range
     angle_rad += PI / 2.0; // 90 deg offset
@@ -390,4 +392,8 @@ void rotation_set(float angle_rad){
 }
 float rotation_get(void){
     return get_total_sensor_angle() / (float)MT6835_CPR / 8 * 2 * PI;
+}
+
+float rotation_target_get(){
+    return target_angle_rad;
 }

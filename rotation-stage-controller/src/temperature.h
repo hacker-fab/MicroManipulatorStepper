@@ -6,5 +6,6 @@ int temperature_poll(void);
 
 void temperature_set(float temp);
 float temperature_get(void);
+float temperature_target_get(void);
 
 #endif // TEMPERATURE_H

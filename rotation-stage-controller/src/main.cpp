@@ -23,11 +23,11 @@ void setup()
         (i2c_parser_callbacks){
             .home_rotation = rotation_home,
             .set_rotation_target = rotation_set,
-            .get_rotation_target = rotation_get,
+            .get_rotation_target = rotation_target_get,
             .get_rotation = rotation_get,
 
             .set_temperature_setpoint = temperature_set,
-            .get_temperature_setpoint = temperature_get,
+            .get_temperature_setpoint = temperature_target_get,
             .get_temperature = temperature_get,
 
             .set_vacuum = vacuum_set,
@@ -64,24 +64,17 @@ static char invalid_command_hint[] = "Invalid command!\n"
 " * ROT <angle>\n"
 " * where angle is in 1/100 degrees, so 90 deg is 9000\n"
 " * \n"
-" * VAC <0/1>\n"
-" * where 0 is off and 1 is on\n"
+" * VAC <PWM percent>\n"
+" * where 0 is off and 100 is fully on\n"
 " * \n"
 " * TEM <temp>\n"
-" * where temp is in 1/100 degrees C, so 60C is 6000\n";
+" * where temp is in 1/100 degrees C, so 60C is 6000\n"
+" * \n"
+" * Put 'R' in the value to get current sensor value\n"
+" * Example: TEM R\n";
 
 /**
  * Debug command
- * 
- * Format:
- * ROT <angle>
- * where angle is in 1/100 degrees, so 90 deg is 9000
- * 
- * VAC <0/1>
- * where 0 is off and 1 is on
- * 
- * TEM <temp>
- * where temp is in 1/100 degrees C, so 60C is 6000
  */
 void parse_uart_input(){
     
@@ -93,7 +86,7 @@ void parse_uart_input(){
             input_buffer[input_index] = '\0';
 
             // Minimal length
-            if (input_index < 3) {
+            if (input_index < 4) {
                 // invalid line
                 Serial.println(invalid_command_hint);
                 input_index = 0;
@@ -107,6 +100,11 @@ void parse_uart_input(){
                 
                 // input in degree
                 // manual parse to avoid large size
+                if (input_buffer[4] == 'R') {
+                    Serial.println(rotation_get() * 180 / PI);
+                    input_index = 0;
+                    return;
+                }
                 int input_raw = parse_uint(input_buffer + 4);
                 Serial.println(input_raw);
                 float input_angle = input_raw / 100.0;
@@ -118,10 +116,21 @@ void parse_uart_input(){
                 rotation_set(rad_angle);
 
             } else if (strcmp(cmd, "TEM ") == 0) {
+                if (input_buffer[4] == 'R') {
+                    Serial.println(temperature_get());
+                    input_index = 0;
+                    return;
+                }
+
                 int input_raw = parse_uint(input_buffer + 4);
                 temperature_set(input_raw / 100.0);
                 
             } else if (strcmp(cmd, "VAC ") == 0) {
+                if (input_buffer[4] == 'R') {
+                    Serial.println(vacuum_get());
+                    input_index = 0;
+                    return;
+                }
                 vacuum_set(parse_uint(input_buffer + 4));
             } else {
                 Serial.println(invalid_command_hint);

@@ -41,3 +41,7 @@ void temperature_set(float temp){
 float temperature_get(void){
     return temp_roll_avg;
 }
+
+float temperature_target_get(void){
+    return temp_setpoint;
+}
