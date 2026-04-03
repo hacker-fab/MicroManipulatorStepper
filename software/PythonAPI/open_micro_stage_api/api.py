@@ -2,6 +2,7 @@ import re
 import threading
 import time
 from enum import Enum
+import warnings
 
 import numpy as np
 import serial
@@ -221,7 +222,7 @@ class OpenMicroStageInterface:
         SerialInterface.LogLevel.ERROR: Fore.RED,
     }
 
-    def __init__(self, show_communication=True, show_log_messages=True):
+    def __init__(self, show_communication: bool =True, show_log_messages: bool =True, exception_on_no_device: bool =True):
         """Initialize the OMM class
 
         Args:
@@ -233,6 +234,7 @@ class OpenMicroStageInterface:
         self.show_communication = show_communication
         self.show_log_messages = show_log_messages
         self.disable_message_callbacks = False
+        self.exception_on_no_device = exception_on_no_device
 
     def connect(self, port: str, baud_rate: int = 921600):
         """Connects to the OMM
@@ -273,6 +275,22 @@ class OpenMicroStageInterface:
         if self.serial is not None:
             self.serial.close()
             self.serial = None
+
+    def check_connection(self)->bool:
+        """Check if a connection to the device has been made
+
+        Returns:
+            bool: The device status
+        """
+        if self.serial is None:
+            if self.exception_on_no_device:
+                raise RuntimeError("No connection to device. Please call connect() first.")
+            else:
+                print(Fore.MAGENTA + "No connection to device. Please call connect() first." + Style.RESET_ALL)
+                warnings.warn("No connection to device. Please call connect() first.")
+                return False
+        return True
+
 
     def log_msg_callback(self, log_level, msg):
         if not self.show_log_messages or self.disable_message_callbacks:
@@ -315,6 +333,9 @@ class OpenMicroStageInterface:
         Returns:
             tuple[int, int, int]: Returns the Major, Minor, and Patch version as integers. If the command fails, returns (0, 0, 0).
         """
+        if not self.check_connection():
+            return 0, 0, 0
+        
         ok, response = self.serial.send_command("M58")
         if ok != SerialInterface.ReplyStatus.OK or len(response) == 0:
             return 0, 0, 0
@@ -332,6 +353,9 @@ class OpenMicroStageInterface:
         Returns:
             SerialInterface.ReplyStatus: The status of the command (e.g. OK, ERROR, TIMEOUT).
         """
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+    
         axis_chars = ["A", "B", "C", "D", "E", "F"]
         if axis_list is None:
             axis_list = [0, 1, 2]
@@ -347,13 +371,16 @@ class OpenMicroStageInterface:
         
         return self.serial.ReplyStatus.OK
 
-    def calibrate_joint(self, joint_index: int, save_result: bool):
+    def calibrate_joint(self, joint_index: int, save_result: bool)->tuple[SerialInterface.ReplyStatus, list[list[float]]]:
         """
         Calibrates the given joint and returns the measured data as three lists containing:
             data[0]: list of motor angles
             data[1]: list of electric field angles
             data[2]: list of raw encoder counts
         """
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+    
         cmd = f"M56 J{joint_index} P"
         if save_result:
             cmd += " S"
@@ -378,6 +405,9 @@ class OpenMicroStageInterface:
         Returns
             SerialInterface.ReplyStatus: The status of the command (e.g. OK, ERROR, TIMEOUT, BUSY).
         """
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+    
         # Convert to homogeneous vector
         transformed = self.workspace_transform @ np.array([x, y, z, 1.0])
         x_t, y_t, z_t = transformed[:3] / transformed[3]
@@ -392,15 +422,22 @@ class OpenMicroStageInterface:
             if res != SerialInterface.ReplyStatus.BUSY or not blocking:
                 return res
 
-    def dwell(self, time_s, blocking, timeout=1):
+    def dwell(self, time_s: float, blocking: bool, timeout: float=1)->SerialInterface.ReplyStatus:
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+
         cmd = f"G4 S{time_s:.6f}\n"
         # resend messages if queue is full
         while True:
             res, msg = self.serial.send_command(cmd + "\n", timeout=timeout)
             if res != SerialInterface.ReplyStatus.BUSY or not blocking:
                 return res
+        return SerialInterface.ReplyStatus.OK
 
     def set_max_acceleration(self, linear_accel, angular_accel):
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+
         linear_accel = max(linear_accel, 0.01)
         angular_accel = max(angular_accel, 0.01)
         cmd = f"M204 L{linear_accel:.6f} A{angular_accel:.6f}\n"
@@ -416,6 +453,9 @@ class OpenMicroStageInterface:
         Returns:
             SerialInterface.ReplyStatus: The status of the command (e.g. OK, ERROR, TIMEOUT).
         """
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+    
         disable_message_callbacks_prev = self.disable_message_callbacks
         if disable_callbacks:
             self.disable_message_callbacks = True
@@ -437,6 +477,9 @@ class OpenMicroStageInterface:
         Returns:
             tuple[float, float, float] | tuple[None, None, None]: x,y,z floats in workspace coordinates, or None,None,None if the command failed
         """
+        if not self.check_connection():
+            return 0.0, 0.0, 0.0
+        
         ok, response = self.serial.send_command("M50")
         if ok != SerialInterface.ReplyStatus.OK or len(response) == 0:
             return None, None, None
@@ -450,21 +493,31 @@ class OpenMicroStageInterface:
         return float(x), float(y), float(z)
 
     def read_encoder_angles(self):
+        if not self.check_connection():
+            return []
+
         ok, response = self.serial.send_command("M51")
         if ok != SerialInterface.ReplyStatus.OK or len(response) == 0:
             return []
         return []
 
     def read_device_state_info(self):
+        if not self.check_connection():
+            return SerialInterface.ReplyStatus.OK
+        
         res, msg = self.serial.send_command("M57")
         return res
 
     def set_servo_parameter(self, pos_kp=150, pos_ki=50000, vel_kp=0.2, vel_ki=100, vel_filter_tc=0.0025):
+        if not self.check_connection():
+            return SerialInterface.ReplyStatus.OK
         cmd = f"M55 A{pos_kp:.6f} B{pos_ki:.6f} C{vel_kp:.6f} D{vel_ki:.6f} F{vel_filter_tc:.6f}"
         res, msg = self.serial.send_command(cmd)
         return res
 
     def enable_motors(self, enable):
+        if not self.check_connection():
+            return SerialInterface.ReplyStatus.OK
         cmd = "M17" if enable else "M18"
         res, msg = self.serial.send_command(cmd, timeout=5)
         return res
@@ -480,6 +533,9 @@ class OpenMicroStageInterface:
         Returns:
             SerialInterface.ReplyStatus: The status of the command (e.g. OK, ERROR, TIMEOUT).
         """
+        if not self.check_connection():
+            return SerialInterface.ReplyStatus.OK
+    
         # Convert to homogeneous vector
         transformed = self.workspace_transform @ np.array([x, y, z, 1.0])
         x_t, y_t, z_t = transformed[:3] / transformed[3]
@@ -488,20 +544,60 @@ class OpenMicroStageInterface:
         res, msg = self.serial.send_command(cmd)
         return res
 
+    def get_temperature(self)->float:
+        """Get the current temperature
+
+        Returns:
+            float: The current temperature in celsius.
+        """
+        if not self.check_connection():
+            return 0.0
+
     def set_temperature(self, temperature: float):
         """Update the desired temperature
 
         Args:
             temperature (float): Value in celsius. The device will try to reach and maintain this temperature.
         """
-    
+        if not self.check_connection():
+            return
+
+    def get_vacuum(self)->bool:
+        """Get the current vacuum state
+
+        Returns:
+            bool: True if the vacuum is on, False if it is off.
+        """
+        if not self.check_connection():
+            return False
+        
     def set_vacuum(self, vacuum_on: bool):
         """Turn the vacuum on or off
 
         Args:
             vacuum_on (bool): If true, the vacuum will be turned on. If false, it will be turned off.
         """
+        if not self.check_connection():
+            return
     
+    def set_rotation(self, angle: float):
+        """Set the rotation angle of the stage
+
+        Args:
+            angle (float): The desired rotation angle in degrees.
+        """
+        if not self.check_connection():
+            return
+    
+    def get_rotation(self)->float:
+        """Get the current rotation angle of the stage
+
+        Returns:
+            float: The current rotation angle in degrees.
+        """
+        if not self.check_connection():
+            return 0.0
+
     def send_command(self, cmd: str, timeout_s: float = 5):
         res, msg = self.serial.send_command(cmd, timeout_s)
         return res, msg
