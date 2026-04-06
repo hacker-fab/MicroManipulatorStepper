@@ -59,6 +59,7 @@ Robot::Robot(float path_segment_time_step) :
     robot_tools[i] = nullptr;
 
   state = ERobotState::IDLE;
+  peripheral = nullptr;
 }
 
 Robot::~Robot() {
@@ -120,6 +121,11 @@ void Robot::init() {
 
   robot_tools[1] = new PwmTool();
   ((PwmTool*)robot_tools[1])->init(PIN_TOOL2, 8000, 8);
+
+  // add peripherals if enabled
+  i2c_handle = new TwoWire(PERIPHERAL_I2C_INSTANCE, PERIPHERAL_I2C_SDA_PIN, PERIPHERAL_I2C_SCL_PIN);
+  peripheral = new Peripheral(i2c_handle);
+  peripheral->begin(PERIPHERAL_ENABLED);
 
   // setup timer for updating the motion controller (which evaluates joint space path
   // segments and produces the current target position for the servo loops)

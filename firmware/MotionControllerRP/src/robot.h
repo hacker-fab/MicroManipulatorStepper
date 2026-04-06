@@ -15,6 +15,7 @@
 #include "servo_control/servo_controller.h"
 #include "utilities/lookup_table.h"
 #include "utilities/math_constants.h"
+#include "peripheral_control/peripheral.h"
 
 #include "motion_control/path_planner.h"
 #include "motion_control/motion_controller.h"
@@ -116,4 +117,7 @@ class Robot : public ICommandProcessor {
     FrequencyCounter motion_controller_frequency_counter;
 
     std::array<IRobotTool*, NUM_TOOLS> robot_tools;
+    // Peripheral Device pointer
+    TwoWire* i2c_handle;
+    Peripheral* peripheral;
 };
