@@ -1,5 +1,6 @@
 #include <hw_config.h>
 #include "peripheral.h"
+#include <utilities/logging.h>
 
 Peripheral::Peripheral(TwoWire* wire_ptr) {
   // initialize the two wire system
@@ -96,7 +97,9 @@ bool Peripheral::get_vac() {
 }
 
 bool Peripheral::home() {
+  LOG_INFO("homing peripheral...");
   write_to_register(HOME_REG, 0, NULL);
+  LOG_INFO("homed peripheral");
   return true;
 }
 void Peripheral::estop() {

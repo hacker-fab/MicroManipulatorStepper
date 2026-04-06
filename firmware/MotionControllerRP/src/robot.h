@@ -84,6 +84,14 @@ class Robot : public ICommandProcessor {
     void process_home_command(const GCodeCommand& cmd, std::string& reply);
     void process_calibrate_joint_command(const GCodeCommand& cmd, std::string& reply);
     void process_tool_output_command(const GCodeCommand& cmd, std::string& reply);
+    void process_set_rot_command(const GCodeCommand& cmd, std::string& reply);
+    void process_set_temperature_command(const GCodeCommand& cmd, std::string& reply);
+    void process_get_temperature_command(const GCodeCommand& cmd, std::string& reply);
+    void process_vacuum_on_command(const GCodeCommand& cmd, std::string& reply);
+    void process_vacuum_off_command(const GCodeCommand& cmd, std::string& reply);
+    void process_get_position_command(const GCodeCommand& cmd, std::string& reply);
+    void process_quick_stop_command(const GCodeCommand& cmd, std::string& reply);
+    void process_get_vacuum_status_command(const GCodeCommand& cmd, std::string& reply);
 
   protected:
     bool check_all_joints_ready();   // checks if all joints are homed and calibrated

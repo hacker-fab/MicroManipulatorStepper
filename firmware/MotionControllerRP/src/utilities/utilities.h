@@ -4,7 +4,7 @@
 //          All text in here must be included in any redistribution.
 // Author:  M. S. (diffraction limited)
 // --------------------------------------------------------------------------------------
-
+#pragma once
 #include <string>
 #include <vector>
 #include <stdint.h>
