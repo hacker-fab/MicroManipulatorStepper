@@ -10,11 +10,6 @@ Using full frame for analysis
 
 Analyzing motion in video...
   Processed 400/408 frames (98.0%)
-
-Performed optical flow analysis on 407 frames
-Motion range: 0.2467 to 3.8074
-Computing FFT...
-
 ======================================================================
 TOP 10 VIBRATION FREQUENCIES
 ======================================================================
