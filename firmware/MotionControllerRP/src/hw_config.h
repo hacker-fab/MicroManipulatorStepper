@@ -69,13 +69,6 @@ constexpr float VEL_KI = 90.0f;
 // also requires the initialization of the correct number of 'RobotJoint' objects
 // in the Robtos init method.
 
-//--- PERIPHERAL ------------------------------------------------------------------
-#define PERIPHERAL_ENABLED true
-#define PERIPHERAL_I2C_ADDRESS 0x10
-#define PERIPHERAL_I2C_INSTANCE PICO_DEFAULT_I2C_INSTANCE()
-#define PERIPHERAL_I2C_SDA_PIN PICO_DEFAULT_I2C_SDA_PIN
-#define PERIPHERAL_I2C_SCL_PIN PICO_DEFAULT_I2C_SCL_PIN
-
 //--- PINS --------------------------------------------------------------------
 
 #define JOINT_READY_OVERRIDE

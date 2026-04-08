@@ -59,7 +59,6 @@ Robot::Robot(float path_segment_time_step) :
     robot_tools[i] = nullptr;
 
   state = ERobotState::IDLE;
-  peripheral = nullptr;
 }
 
 Robot::~Robot() {
@@ -121,11 +120,6 @@ void Robot::init() {
 
   robot_tools[1] = new PwmTool();
   ((PwmTool*)robot_tools[1])->init(PIN_TOOL2, 8000, 8);
-
-  // add peripherals if enabled
-  i2c_handle = new TwoWire(PERIPHERAL_I2C_INSTANCE, PERIPHERAL_I2C_SDA_PIN, PERIPHERAL_I2C_SCL_PIN);
-  peripheral = new Peripheral(i2c_handle);
-  peripheral->begin(PERIPHERAL_ENABLED);
 
   // setup timer for updating the motion controller (which evaluates joint space path
   // segments and produces the current target position for the servo loops)
@@ -452,7 +446,6 @@ void Robot::process_command(const GCodeCommand& cmd, std::string& reply) {
   else if(cmd.get_command() == "G4") process_dwell_command(cmd, reply);
   else if(cmd.get_command() == "G24") process_set_pose_command(cmd, reply);
   else if(cmd.get_command() == "G28") process_home_command(cmd, reply);
-  else if(cmd.get_command() == "G92") process_set_rot_command(cmd, reply);
   else if(startswith(cmd.get_command(), "M")) process_machine_command(cmd, reply);
   else reply="error: unknown command\n";
 }
@@ -466,47 +459,7 @@ void Robot::process_machine_command(const GCodeCommand& cmd, std::string& reply)
     return;
   }
 
-  // set peripheral temperature
-  if(cmd.get_command() == "M104") {
-    process_set_temperature_command(cmd, reply);
-    return;
-  }
-
-  // get peripheral temperature
-  if(cmd.get_command() == "M105") {
-    process_get_temperature_command(cmd, reply);
-    return;
-  }
-
-  // vacuum on
-  if(cmd.get_command() == "M10") {
-    process_vacuum_on_command(cmd, reply);
-    return;
-  }
-
-  // vacuum off
-  if(cmd.get_command() == "M11") {
-    process_vacuum_off_command(cmd, reply);
-    return;
-  }
-
-  // get current position
-  if(cmd.get_command() == "M114") {
-    process_get_position_command(cmd, reply);
-    return;
-  }
-
-  // quick stop
-  if(cmd.get_command() == "M410") {
-    process_quick_stop_command(cmd, reply);
-    return;
-  }
-
-  // get vacuum status
-  if(cmd.get_command() == "M801") {
-    process_get_vacuum_status_command(cmd, reply);
-    return;
-  }
+   // enable motors
   if(cmd.get_command() == "M17") {
     // read current pose from HW and set it as current pose
     set_pose(pose_from_joint_angles());
@@ -783,7 +736,7 @@ void Robot::process_home_command(const GCodeCommand& cmd, std::string& reply) {
     }
   }
 
-  std::string supported_words = "A,B,C,D,E,F,W";
+  std::string supported_words = "A,B,C,D,E,F";
   if(cmd.contains_unsupported_words(supported_words+",G,M")) {
     reply = "error: Unsupported parameter found. Only [" + supported_words + "] are supported\n";
     return;
@@ -793,17 +746,6 @@ void Robot::process_home_command(const GCodeCommand& cmd, std::string& reply) {
     joint_mask = 255;
 
   bool ok = home(joint_mask, retract_angles);
-
-  // home peripheral
-  if(cmd.has_word('W')){
-    float rot_angle = cmd.get_value('W');
-    if(peripheral != nullptr) {
-      ok &= peripheral->home();
-      if(rot_angle != NAN){
-        peripheral->set_rot(RotDegree(rot_angle));
-      }
-    }
-  }
 
   reply = ok ? "ok\n" : "error\n";
 }
@@ -830,95 +772,5 @@ void Robot::process_tool_output_command(const GCodeCommand& cmd, std::string& re
   current_tool_outputs[tool_index] = tool_value;
 
   reply = "ok\n";
-}
-
-void Robot::process_set_rot_command(const GCodeCommand& cmd, std::string& reply) {
-  // G92: Set position - currently only supports rotation (W parameter)
-  if(cmd.has_word('W')) {
-    float rotation_deg = cmd.get_value('W');
-    if(peripheral != nullptr) {
-      peripheral->set_rot(RotDegree(rotation_deg));
-      reply = "ok\n";
-    } else {
-      reply = "error: peripheral not initialized\n";
-    }
-  } else {
-    reply = "ok\n";
-  }
-}
-
-void Robot::process_set_temperature_command(const GCodeCommand& cmd, std::string& reply) {
-  // M104: Set temperature
-  if(cmd.has_word('S')) {
-    float temperature = cmd.get_value('S');
-    if(peripheral != nullptr) {
-      peripheral->set_temp(TempDegree(temperature));
-      reply = "ok\n";
-    } else {
-      reply = "error: peripheral not initialized\n";
-    }
-  } else {
-    reply = "error: temperature value required (S parameter)\n";
-  }
-}
-
-void Robot::process_get_temperature_command(const GCodeCommand& cmd, std::string& reply) {
-  // M105: Get temperature
-  if(peripheral != nullptr) {
-    float temperature = peripheral->get_cur_temp().get_value();
-    reply = std::to_string(temperature) + "\n";
-    reply += "ok\n";
-  } else {
-    reply = "error: peripheral not initialized\n";
-  }
-}
-
-void Robot::process_vacuum_on_command(const GCodeCommand& cmd, std::string& reply) {
-  // M10: Turn vacuum on
-  if(peripheral != nullptr) {
-    peripheral->set_vac(true);
-    reply = "ok\n";
-  } else {
-    reply = "error: peripheral not initialized\n";
-  }
-}
-
-void Robot::process_vacuum_off_command(const GCodeCommand& cmd, std::string& reply) {
-  // M11: Turn vacuum off
-  if(peripheral != nullptr) {
-    peripheral->set_vac(false);
-    reply = "ok\n";
-  } else {
-    reply = "error: peripheral not initialized\n";
-  }
-}
-
-void Robot::process_get_position_command(const GCodeCommand& cmd, std::string& reply) {
-  // M114: Get current position
-  Pose6DF pose = pose_from_joint_angles();
-  reply = std::string("X") + std::to_string(pose.translation.x);
-  reply += std::string(" Y") + std::to_string(pose.translation.y);
-  reply += std::string(" Z") + std::to_string(pose.translation.z);
-  if(peripheral != nullptr) {
-    reply += std::string(" W") + std::to_string(peripheral->get_cur_rot().get_value());
-  }
-  reply += "\nok\n";
-}
-
-void Robot::process_quick_stop_command(const GCodeCommand& cmd, std::string& reply) {
-  // M410: Quick stop - immediately disable servo control
-  enable_servo_control(false);
-  reply = "ok\n";
-}
-
-void Robot::process_get_vacuum_status_command(const GCodeCommand& cmd, std::string& reply) {
-  // M801: Get vacuum status
-  if(peripheral != nullptr) {
-    bool vac_status = peripheral->get_vac();
-    reply = std::to_string(vac_status) + "\n";
-    reply += "ok\n";
-  } else {
-    reply = "error: peripheral not initialized\n";
-  }
 }
 
