@@ -35,7 +35,7 @@ constexpr float HOMING_VELOCITY   = 1.0f;        // rad per s
 constexpr float HOMING_CURRENT    = 0.5f;       // range 0..1
 // NOT IMPLEMENTED YET: constexpr float HOMING_FINISH_POS = 0.5f;        // in rad
 constexpr float HOMING_RETRACTION_FIELD_ANGLE = 8.0f;
-constexpr float HOMING_RETRACTION_Z_FIELD_ANGLE = 2.0f;
+constexpr float HOMING_RETRACTION_Z_FIELD_ANGLE = 4.0f;
 constexpr float CALIBRATION_RETRACTION_FIELD_ANGLE = 0.25f;
 
 //--- CALIBRATION -------------------------------------------------------------
