@@ -77,7 +77,7 @@ def run_free_move(oms):
     """Run free move mode"""
     user_input = input("Press Enter to home or 's' to skip: ")
     if user_input.lower() != 's':
-        oms.home(axis_list=[2])
+        oms.home()
 
     oms.wait_for_stop()
 

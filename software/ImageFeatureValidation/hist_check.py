@@ -3,8 +3,8 @@ import re
 from collections import defaultdict
 import numpy as np
 
-SKIP_FIRST_MOVE = True
-SKIP_COMBINED_MOVE = True
+SKIP_FIRST_MOVE = False
+SKIP_COMBINED_MOVE = False
 
 def parse_position(pos_str):
     """Parse '(x,y)' string into floats."""
@@ -49,7 +49,7 @@ def analyze_csv(path):
                     for expected, points in cur_mov_points.items():
                         if(len(points) == 1):
                             continue
-                        print(f"Segment completed for expected {expected}: {len(points):3} points with len {np.mean(points):11.6f} µm and min {np.min(points):11.6f} µm and max {np.max(points):11.6f} µm and std {np.std(points):11.6f} µm and percentage {np.std(points) / np.mean(points) * 100:11.6f}%")
+                        print(f"Segment completed for expected {expected:3}: {len(points):3} points with len {np.mean(points):11.6f} µm and min {np.min(points):11.6f} µm and max {np.max(points):11.6f} µm and std {np.std(points):11.6f} µm and percentage {np.std(points) / np.mean(points) * 100:11.6f}%")
                 cur_mov_points = defaultdict(list)
             if SKIP_FIRST_MOVE and (y_seen and is_x_move):
                 y_seen = False
@@ -57,7 +57,7 @@ def analyze_csv(path):
                     for expected, points in cur_mov_points.items():
                         if(len(points) == 1):
                             continue
-                        print(f"Segment completed for expected {expected}: {len(points):3} points with len {np.mean(points):11.6f} µm and min {np.min(points):11.6f} µm and max {np.max(points):11.6f} µm and std {np.std(points):11.6f} µm and percentage {np.std(points) / np.mean(points) * 100:11.6f}%")
+                        print(f"Segment completed for expected {expected:3}: {len(points):3} points with len {np.mean(points):11.6f} µm and min {np.min(points):11.6f} µm and max {np.max(points):11.6f} µm and std {np.std(points):11.6f} µm and percentage {np.std(points) / np.mean(points) * 100:11.6f}%")
                 cur_mov_points = defaultdict(list)
 
             if SKIP_FIRST_MOVE and is_x_move and not x_seen:
@@ -99,7 +99,7 @@ def analyze_csv(path):
 
 
 if __name__ == "__main__":
-    path = "move_data.csv"
+    path = "move_data_v4.csv"
     x_results, y_results, combined_results = analyze_csv(path)
     
     print("X Axis:")

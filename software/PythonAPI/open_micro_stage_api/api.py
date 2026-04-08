@@ -472,6 +472,28 @@ class OpenMicroStageInterface:
         self.disable_message_callbacks = disable_message_callbacks_prev
         return res
 
+    def is_stopped(self, disable_callbacks=True)->bool | None:
+        """Check if the device is stopped.
+
+        Args:
+            disable_callbacks (bool, optional): If True, disables message callbacks during the check. Defaults to True.
+        Returns:
+            SerialInterface.ReplyStatus: The status of the command (e.g. OK, ERROR, TIMEOUT).
+        """
+        if not self.check_connection():
+            return self.serial.ReplyStatus.OK
+    
+        disable_message_callbacks_prev = self.disable_message_callbacks
+        if disable_callbacks:
+            self.disable_message_callbacks = True
+
+        res, msg = self.serial.send_command("M53\n")
+        self.disable_message_callbacks = disable_message_callbacks_prev
+        if res == SerialInterface.ReplyStatus.OK:
+            return msg.strip() == "1"
+        else:
+            return None
+        
     def read_current_position(self)->tuple[float, float, float] | tuple[None, None, None]:
         """Get the current position of the device
 

@@ -159,7 +159,7 @@ for row_idx in range(grid_size):
     for col_idx in range(grid_size):
         x = col_idx * grid_spacing
         y = row_idx * grid_spacing
-        rows.append([f'{x:.6f}', f'{y:.6f}', '10.0', '4'])
+        #rows.append([f'{x:.6f}', f'{y:.6f}', '10.0', '4'])
 
 # Final move back to start
 rows.append(['0.000000', '0.000000', '10.0'])
@@ -168,7 +168,7 @@ print(f'Total rows (including header): {len(rows)}')
 print(f'Total test points: {len(rows) - 1}')
 
 # Write to CSV
-with open('movement_tests.csv', 'w', newline='') as f:
+with open('movement_test_no_grid.csv', 'w', newline='') as f:
     writer = csv.writer(f)
     writer.writerows(rows)
 

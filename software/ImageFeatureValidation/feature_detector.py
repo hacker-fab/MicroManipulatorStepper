@@ -1065,6 +1065,7 @@ def analyze_movements(
     fov_deg: float = DEFAULT_FOV_DEG,
     match_limit: float = DEFAULT_MATCH_LIMIT,
     num_threads: int = 5,
+    include_variation_analysis: bool = False,
 ):
     """
     Analyze movement accuracy by reading indexed image folders and CSV metadata.
@@ -1279,131 +1280,134 @@ def analyze_movements(
         print(f"  Actual:     {np.mean(actual_distances):7.1f} ± {np.std(actual_distances):6.1f} µm")
         print(f"  Difference: {np.mean(differences):+7.1f} ± {np.std(differences):6.1f} µm")
     
-    # Analyze image variations at same endpoints
-    print("\n" + "="*80)
-    print("ANALYZING IMAGE VARIATIONS AT SAME ENDPOINTS")
-    print("="*80)
-    
+
     image_variations: list[ImageVariationResult] = []
-    endpoints_to_indices: dict[tuple, list[int]] = {}
-    
-    # Load progress for endpoints
-    variation_progress_file = root_dir / "variation_progress.csv"
-    variation_results_file = root_dir / "image_variation_results.csv"
-    processed_endpoints = load_variation_progress(variation_progress_file)
-    existing_variation_results = load_image_variation_results(variation_results_file)
-    
-    # Group indices by their rounded endpoint
-    for idx, (x, y) in idx_to_coord.items():
-        rounded_ep = round_endpoint(x, y)
-        if rounded_ep not in endpoints_to_indices:
-            endpoints_to_indices[rounded_ep] = []
-        endpoints_to_indices[rounded_ep].append(idx)
+    if include_variation_analysis:
+        # Analyze image variations at same endpoints
+        print("\n" + "="*80)
+        print("ANALYZING IMAGE VARIATIONS AT SAME ENDPOINTS")
+        print("="*80)
+        
 
-    for endpoint, idx_list in sorted(endpoints_to_indices.items()):
-        if len(idx_list) < 2:
-            continue  # Skip endpoints with only one visit
+        endpoints_to_indices: dict[tuple, list[int]] = {}
         
-        rounded_x, rounded_y = endpoint
-        endpoint_str = f"({rounded_x:.9f},{rounded_y:.9f})"
+        # Load progress for endpoints
+        variation_progress_file = root_dir / "variation_progress.csv"
+        variation_results_file = root_dir / "image_variation_results.csv"
+        processed_endpoints = load_variation_progress(variation_progress_file)
+        existing_variation_results = load_image_variation_results(variation_results_file)
         
-        # Skip if already processed
-        if endpoint_str in processed_endpoints:
-            print(f"\n  Endpoint {endpoint_str}: Already processed, skipping")
-            continue
-        if len(idx_list) < 2:
-            continue  # Skip endpoints with only one visit
-        
-        rounded_x, rounded_y = endpoint
-        endpoint_str = f"({rounded_x:.9f},{rounded_y:.9f})"
-        
-        print(f"\n  Endpoint {endpoint_str}: {len(idx_list)} visits (indices: {idx_list})")
-        
-        # Collect all images from all visits to this endpoint
-        all_images_by_idx: dict[int, list[Path]] = {}
-        
-        for idx in idx_list:
-            folder = root_dir / str(idx)
-            if folder.exists():
-                # only use one image from each folder
-                images = [sorted([p for p in folder.glob('*') if p.suffix.lower() in image_extensions])[0]]
-                if images:
-                    all_images_by_idx[idx] = images
-        
-        # Compare images across different visits
-        all_comparisons = []
-        idx_list_with_images = list(all_images_by_idx.keys())
-        
-        # Collect all image pairs to compare
-        image_pairs_to_compare = []
-        for i in range(len(idx_list_with_images)):
-            for j in range( len(idx_list_with_images)-1, i + 1, -1):
-                idx_i = idx_list_with_images[i]
-                idx_j = idx_list_with_images[j]
-                
-                images_i = all_images_by_idx[idx_i]
-                images_j = all_images_by_idx[idx_j]
-                
-                # Add all image pairs between these two visits
-                for img_i in images_i:
-                    for img_j in images_j:
-                        image_pairs_to_compare.append((img_i, img_j))
+        # Group indices by their rounded endpoint
+        for idx, (x, y) in idx_to_coord.items():
+            rounded_ep = round_endpoint(x, y)
+            if rounded_ep not in endpoints_to_indices:
+                endpoints_to_indices[rounded_ep] = []
+            endpoints_to_indices[rounded_ep].append(idx)
 
+        for endpoint, idx_list in sorted(endpoints_to_indices.items()):
+            if len(idx_list) < 2:
+                continue  # Skip endpoints with only one visit
+            
+            rounded_x, rounded_y = endpoint
+            endpoint_str = f"({rounded_x:.9f},{rounded_y:.9f})"
+            
+            # Skip if already processed
+            if endpoint_str in processed_endpoints:
+                print(f"\n  Endpoint {endpoint_str}: Already processed, skipping")
+                continue
+            if len(idx_list) < 2:
+                continue  # Skip endpoints with only one visit
+            
+            rounded_x, rounded_y = endpoint
+            endpoint_str = f"({rounded_x:.9f},{rounded_y:.9f})"
+            
+            print(f"\n  Endpoint {endpoint_str}: {len(idx_list)} visits (indices: {idx_list})")
+            
+            # Collect all images from all visits to this endpoint
+            all_images_by_idx: dict[int, list[Path]] = {}
+            
+            for idx in idx_list:
+                folder = root_dir / str(idx)
+                if folder.exists():
+                    # only use one image from each folder
+                    images = [sorted([p for p in folder.glob('*') if p.suffix.lower() in image_extensions])[0]]
+                    if images:
+                        all_images_by_idx[idx] = images
+            
+            # Compare images across different visits
+            all_comparisons = []
+            idx_list_with_images = list(all_images_by_idx.keys())
+            
+            # Collect all image pairs to compare
+            image_pairs_to_compare = []
+            for i in range(len(idx_list_with_images)):
+                for j in range( len(idx_list_with_images)-1, i + 1, -1):
+                    idx_i = idx_list_with_images[i]
+                    idx_j = idx_list_with_images[j]
+                    
+                    images_i = all_images_by_idx[idx_i]
+                    images_j = all_images_by_idx[idx_j]
+                    
+                    # Add all image pairs between these two visits
+                    for img_i in images_i:
+                        for img_j in images_j:
+                            image_pairs_to_compare.append((img_i, img_j))
+
+                    if len(image_pairs_to_compare) >= MAX_POINT_COMPARISONS:
+                        break
                 if len(image_pairs_to_compare) >= MAX_POINT_COMPARISONS:
                     break
-            if len(image_pairs_to_compare) >= MAX_POINT_COMPARISONS:
-                break
 
-        # Compare all image pairs in parallel using thread pool
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = {
-                executor.submit(
-                    compare_image_pair_for_variation,
-                    img_i, img_j, match_limit, camera_height_um, fov_deg, pixel_to_um
-                ): (img_i, img_j)
-                for img_i, img_j in image_pairs_to_compare
-            }
+            # Compare all image pairs in parallel using thread pool
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = {
+                    executor.submit(
+                        compare_image_pair_for_variation,
+                        img_i, img_j, match_limit, camera_height_um, fov_deg, pixel_to_um
+                    ): (img_i, img_j)
+                    for img_i, img_j in image_pairs_to_compare
+                }
+                
+                for future in as_completed(futures):
+                    success, tx, ty, xy_movement = future.result()
+                    if success:
+                        all_comparisons.append({
+                            'tx': tx,
+                            'ty': ty,
+                            'xy_movement': xy_movement,
+                        })
             
-            for future in as_completed(futures):
-                success, tx, ty, xy_movement = future.result()
-                if success:
-                    all_comparisons.append({
-                        'tx': tx,
-                        'ty': ty,
-                        'xy_movement': xy_movement,
-                    })
+            if all_comparisons:
+                # Calculate statistics (XY only, ignoring Z and rotation)
+                tx_values = [c['tx'] for c in all_comparisons]
+                ty_values = [c['ty'] for c in all_comparisons]
+                xy_movement_values = [c['xy_movement'] for c in all_comparisons]
+                
+                result = ImageVariationResult(
+                    endpoint=endpoint_str,
+                    num_visits=len(idx_list),
+                    num_image_pairs=len(all_comparisons),
+                    mean_tx_um=float(np.mean(tx_values)),
+                    std_tx_um=float(np.std(tx_values)),
+                    mean_ty_um=float(np.mean(ty_values)),
+                    std_ty_um=float(np.std(ty_values)),
+                    mean_total_xy_movement_um=float(np.mean(xy_movement_values)),
+                )
+                image_variations.append(result)
+                
+                # Save result immediately
+                save_image_variation_result(variation_results_file, result)
+                # Update progress after successful completion
+                save_variation_progress(variation_progress_file, [endpoint_str])
+                
+                print(f"    Compared {len(all_comparisons)} image pairs")
+                print(f"    TX variation: {np.mean(tx_values):+7.2f} ± {np.std(tx_values):6.2f} µm")
+                print(f"    TY variation: {np.mean(ty_values):+7.2f} ± {np.std(ty_values):6.2f} µm")
+                print(f"    XY movement: {np.mean(xy_movement_values):7.2f} ± {np.std(xy_movement_values):6.2f} µm")
         
-        if all_comparisons:
-            # Calculate statistics (XY only, ignoring Z and rotation)
-            tx_values = [c['tx'] for c in all_comparisons]
-            ty_values = [c['ty'] for c in all_comparisons]
-            xy_movement_values = [c['xy_movement'] for c in all_comparisons]
-            
-            result = ImageVariationResult(
-                endpoint=endpoint_str,
-                num_visits=len(idx_list),
-                num_image_pairs=len(all_comparisons),
-                mean_tx_um=float(np.mean(tx_values)),
-                std_tx_um=float(np.std(tx_values)),
-                mean_ty_um=float(np.mean(ty_values)),
-                std_ty_um=float(np.std(ty_values)),
-                mean_total_xy_movement_um=float(np.mean(xy_movement_values)),
-            )
-            image_variations.append(result)
-            
-            # Save result immediately
-            save_image_variation_result(variation_results_file, result)
-            # Update progress after successful completion
-            save_variation_progress(variation_progress_file, [endpoint_str])
-            
-            print(f"    Compared {len(all_comparisons)} image pairs")
-            print(f"    TX variation: {np.mean(tx_values):+7.2f} ± {np.std(tx_values):6.2f} µm")
-            print(f"    TY variation: {np.mean(ty_values):+7.2f} ± {np.std(ty_values):6.2f} µm")
-            print(f"    XY movement: {np.mean(xy_movement_values):7.2f} ± {np.std(xy_movement_values):6.2f} µm")
-    
 
-    # Load any previously saved variation results to include in Excel
-    image_variations.extend(existing_variation_results)
+        # Load any previously saved variation results to include in Excel
+        image_variations.extend(existing_variation_results)
 
     
     # Write Excel output if requested
