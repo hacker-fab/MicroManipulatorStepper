@@ -2,6 +2,11 @@
 #define CONFIG_H
 
 
+// uncomment this to print debug messages through serial
+#define DEBUG_PRINTS
+
+
+
 /**
  * MT6835 Sensor
  */
@@ -36,7 +41,7 @@
  */
 #define I2C_SDA PB7
 #define I2C_SCL PB6
-
+#define I2C_SLAVE_ADDRESS 0x10
 
 
 /**

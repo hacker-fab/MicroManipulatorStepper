@@ -20,7 +20,6 @@ struct i2c_parser_callbacks
 
 
 void i2c_parser_init(i2c_parser_callbacks callbacks);
-void i2c_parser_poll(void);
 
 
 

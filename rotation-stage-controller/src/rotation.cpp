@@ -378,23 +378,39 @@ void rotation_set(float angle_rad){
 
     // the hardware only support -90 to 270 degrees
     // map the rotation to that range
-    angle_rad += PI / 2.0; // 90 deg offset
-    angle_rad = fmod(angle_rad, 2 * PI);
-    if (angle_rad < 0)
+    // angle_rad += PI / 2.0; // 90 deg offset
+    // angle_rad = fmod(angle_rad, 2 * PI);
+    while (angle_rad < -PI/2)
     {
         angle_rad += 2 * PI;
     }
-    angle_rad -= PI / 2.0; // remove 90 deg offset
+    while (angle_rad > PI/2*3)
+    {
+        angle_rad -= 2 * PI;
+    }
+    Serial.println(angle_rad * 180 / PI);
+
+    float single_loop_angle = angle_rad;
+    while(single_loop_angle < 0){
+        single_loop_angle += 2 * PI;
+    }
+
+    bool negative = angle_rad < 0;
+
+    
+    // angle_rad -= PI / 2.0; // remove 90 deg offset
 
     // convert using the lookup table to counter any magnetic non-linearity
     // a full rotation is index 200
-    float index_float = angle_rad / (2 * PI) * 200;
+    float index_float = single_loop_angle / (2 * PI) * 200;
     uint32_t index = (uint32_t)(index_float);
     float ratio = index_float - index;
     index = index % 200;
 
     target_sensor_angle = angle_lookup_table[index] * (1 - ratio) + angle_lookup_table[(index + 1) % 200] * ratio;
-
+    if (negative){
+        target_sensor_angle -= MT6835_CPR * 8;
+    }
 }
 float rotation_get(void){
     return get_total_sensor_angle() / (float)MT6835_CPR / 8 * 2 * PI;
