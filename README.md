@@ -203,45 +203,8 @@ You may find configuration for pin numbers, motor type, and other parameters in 
 
 ### Building and Flashing the Firmware
 
-Two build systems are supported:
-
-**PlatformIO** (recommended for getting started — handles toolchain automatically):
-
-Install the [PlatformIO](https://platformio.org/) VS Code extension, open the `firmware/MotionControllerRP/` folder, then build and upload as any PlatformIO project.
-
-**CMake / Make** (for development workflows, CI, and host-native testing):
-
-Requires `cmake`, `ninja`, and the `arm-none-eabi-gcc` toolchain. On Windows, install via [MSYS2](https://www.msys2.org/):
-```bash
-pacman -S mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-arm-none-eabi-toolchain
-```
-
-```bash
-# Build main firmware (produces .uf2 and .elf)
-cd firmware/MotionControllerRP
-make build CMAKE_EXTRA="-DPICO_SDK_FETCH_FROM_GIT=ON"
-
-# Flash to Pico 2 (requires picotool)
-make flash
-
-# Open serial monitor
-make monitor
-
-# Run host-native unit tests (GoogleTest / CTest)
-make test
-
-# All targets: build, clean, flash, monitor, run, test
-make help
-```
-
-The `test_motor` project builds the same way — each test program (`blink`, `encoder`, `stepper`, etc.) produces its own `.uf2`:
-```bash
-cd firmware/test_motor
-make build CMAKE_EXTRA="-DPICO_SDK_FETCH_FROM_GIT=ON"
-make flash TARGET=encoder   # flash a specific test program
-```
-
-The `rotation-stage-controller` (STM32 Blue Pill) uses PlatformIO for cross-compilation due to STM32 Arduino API dependencies. Host-native tests work with `make test`.
+For building and flashing the firmware, Visual Studio Code (available for free on Windows and Linux) is recommended.
+Install the PlatformIO add-on and open the firmware folder. You can now build and flash the firmware like any other PlatformIO project.
 
 ## ⚙ G-Code Interface
 
