@@ -87,10 +87,23 @@ static int32_t read_raw_angle() {
 
     uint32_t raw_angle = ((uint32_t)data[2] << 13) | ((uint32_t)data[3] << 5) | ((uint32_t)data[4] >> 3);
     uint8_t status = data[4]&0x07;
+    if (status & 0b001) {
+        Serial.println("Encoder Over Speed Warning!");
+        return -1;
+    }
+    if (status & 0b010) {
+        Serial.println("Encoder Weak Magnetic Warning!");
+        return -1;
+    }
+    if (status & 0b100) {
+        Serial.println("Encoder Low Voltage Warning!");
+        return -1;
+    }
     uint8_t crc = data[5];
 
     uint8_t expected_crc = calc_crc(raw_angle, status);
     if (expected_crc != crc) {
+        Serial.println("Angle Encoder Invalid CRC!");
         return -1;
     }
     return raw_angle;
@@ -396,7 +409,8 @@ int rotation_poll(uint32_t dt_us){
     }
     
     int32_t field_angle_diff = torque * PWM_MAX_VALUE * 2; // max torque corresponds to 90 degree field angle difference
-    uint32_t field_angle = sensorAngleToFieldAngle(sensor_angle) + field_angle_diff;
+    int32_t field_angle = sensorAngleToFieldAngle(sensor_angle) + field_angle_diff;
+    field_angle = positive_mod(field_angle, PWM_MAX_VALUE * 8);
 
     writeFieldAngle(field_angle);
 
