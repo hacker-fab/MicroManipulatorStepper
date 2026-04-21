@@ -15,6 +15,9 @@ import time
 from scipy import signal
 from scipy import fft as scipy_fft
 import csv
+from scipy import signal
+from scipy.fft import fft, fftfreq
+
 
 from pypylon import pylon
 
@@ -297,13 +300,53 @@ def record_video(
     print(f"\nRecorded {frame_count} frames in {elapsed:.2f}s")
     print(f"Actual framerate achieved: {actual_fps:.1f} FPS")
 
-
-
+# Number of frames used to calibrate the dominant vibration axis.
+CALIBRATION_FRAMES = 30
+ 
+# Fraction of Nyquist above which we warn about possible aliasing.
+ALIASING_THRESHOLD = 0.8
+ 
+ 
+def _dominant_axis(flow_samples: list[np.ndarray]) -> str:
+    """Return 'x' or 'y' — whichever axis has higher variance across samples."""
+    var_x = np.var([np.mean(f[..., 0]) for f in flow_samples])
+    var_y = np.var([np.mean(f[..., 1]) for f in flow_samples])
+    return "x" if var_x >= var_y else "y"
+ 
+ 
+def _signed_displacement(flow: np.ndarray, axis: str) -> float:
+    """Return the mean signed displacement along the chosen axis."""
+    channel = 0 if axis == "x" else 1
+    return float(np.mean(flow[..., channel]))
+ 
+ 
+def _crop(frame_gray: np.ndarray, roi: tuple[int, int, int, int] | None) -> np.ndarray:
+    if roi is None:
+        return frame_gray
+    x, y, w, h = roi
+    return frame_gray[y : y + h, x : x + w]
+ 
+ 
+def _optical_flow(prev: np.ndarray, curr: np.ndarray) -> np.ndarray:
+    return cv2.calcOpticalFlowFarneback(
+        prev,
+        curr,
+        None,
+        pyr_scale=0.5,
+        levels=3,
+        winsize=15,
+        iterations=3,
+        poly_n=5,
+        poly_sigma=1.2,
+        flags=0,
+    )
+ 
+ 
 @APP.command()
 def analyze_vibrations(
     video_path: Path,
     output_csv: Path = None,
-    fps_override: float | None = 40.0,
+    fps_override: float | None = None,
     top_n: int = 10,
     roi_x: int = None,
     roi_y: int = None,
@@ -312,180 +355,322 @@ def analyze_vibrations(
 ):
     """
     Analyze a video to detect vibration frequencies.
-    
-    Uses optical flow analysis to track motion in the video and extract
-    the dominant vibration frequencies using FFT analysis.
-    
+ 
+    Uses optical flow to track signed displacement along the dominant
+    vibration axis, then extracts dominant frequencies via FFT.
+ 
     Args:
-        video_path: Path to the video file to analyze
-        output_csv: Optional path to save results as CSV
-        top_n: Number of top frequencies to report (default: 10)
-        roi_x: X coordinate of region of interest (optional)
-        roi_y: Y coordinate of region of interest (optional)
-        roi_width: Width of region of interest (optional)
-        roi_height: Height of region of interest (optional)
+        video_path: Path to the video file.
+        output_csv: Optional path to save results as CSV.
+        fps_override: Override the FPS reported by the video container.
+        top_n: Number of top frequencies to report (default: 10).
+        roi_x: X coordinate of the top-left corner of the ROI.
+        roi_y: Y coordinate of the top-left corner of the ROI.
+        roi_width: Width of the ROI.
+        roi_height: Height of the ROI.
     """
-    
     video_path = Path(video_path)
     if not video_path.exists():
         print(f"Error: Video file not found: {video_path}")
-        return
-    
-    print(f"Opening video: {video_path}")
+        raise typer.Exit(1)
+ 
     cap = cv2.VideoCapture(str(video_path))
-    
     if not cap.isOpened():
-        print("Error: Could not open video file")
-        return
-    
-    # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS) if fps_override is None else fps_override
+        print("Error: Could not open video file.")
+        raise typer.Exit(1)
+ 
+    container_fps = cap.get(cv2.CAP_PROP_FPS)
+    fps = fps_override if fps_override is not None else container_fps
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    print(f"Video properties:")
-    print(f"  Duration: {frame_count / fps:.2f}s")
-    print(f"  Frame rate: {fps:.1f} FPS")
-    print(f"  Resolution: {width}x{height}")
-    print(f"  Total frames: {frame_count}")
-    
-    # Validate and set ROI
-    if roi_x is not None and roi_y is not None and roi_width is not None and roi_height is not None:
+    nyquist = fps / 2.0
+ 
+    print(f"\nOpening video : {video_path}")
+    print(f"  Resolution  : {width}x{height}")
+    print(f"  Container FPS: {container_fps:.3f}")
+    print(f"  Analysis FPS : {fps:.3f}  (Nyquist = {nyquist:.1f} Hz)")
+    print(f"  Total frames : {frame_count}  ({frame_count / fps:.2f} s)")
+ 
+    roi: tuple[int, int, int, int] | None = None
+    if all(v is not None for v in (roi_x, roi_y, roi_width, roi_height)):
         roi = (roi_x, roi_y, roi_width, roi_height)
-        print(f"Using ROI: x={roi_x}, y={roi_y}, w={roi_width}, h={roi_height}")
+        print(f"  ROI         : x={roi_x} y={roi_y} w={roi_width} h={roi_height}")
     else:
-        roi = None
-        print("Using full frame for analysis")
-    
-    print("\nAnalyzing motion in video...")
-    
-    # Read first frame
+        print("  ROI         : full frame")
+ 
+    # ------------------------------------------------------------------ #
+    # Phase 1 – calibration: determine dominant vibration axis            #
+    # ------------------------------------------------------------------ #
+    print(f"\nCalibrating axis on first {CALIBRATION_FRAMES} frames …")
+ 
     ret, prev_frame = cap.read()
     if not ret:
-        print("Error: Could not read first frame")
-        return
-    
-    prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-    if roi:
-        prev_gray = prev_gray[roi[1]:roi[1]+roi[3], roi[0]:roi[0]+roi[2]]
-    
-    # Motion magnitude time series
-    motion_magnitudes = []
-    frame_times = []
-    
-    frame_idx = 1
-    
+        print("Error: Could not read first frame.")
+        raise typer.Exit(1)
+ 
+    prev_gray = _crop(cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY), roi)
+    calibration_flows: list[np.ndarray] = []
+ 
+    for _ in range(CALIBRATION_FRAMES):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        gray = _crop(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), roi)
+        flow = _optical_flow(prev_gray, gray)
+        calibration_flows.append(flow)
+        prev_gray = gray
+ 
+    if len(calibration_flows) < 5:
+        print("Error: Not enough frames for calibration.")
+        raise typer.Exit(1)
+ 
+    axis = _dominant_axis(calibration_flows)
+    print(f"  Dominant vibration axis: {axis.upper()}")
+ 
+    # ------------------------------------------------------------------ #
+    # Phase 2 – full pass: collect signed displacements                   #
+    # ------------------------------------------------------------------ #
+    print("\nAnalyzing motion …")
+ 
+    # Seed the signal with the calibration frames we already computed.
+    displacements: list[float] = [_signed_displacement(f, axis) for f in calibration_flows]
+ 
+    frame_idx = CALIBRATION_FRAMES + 1  # already consumed that many frames
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if roi:
-                gray = gray[roi[1]:roi[1]+roi[3], roi[0]:roi[0]+roi[2]]
-            
-            # Calculate optical flow
-            # Note: n8 parameter was removed in OpenCV 4.x
-            flow = cv2.calcOpticalFlowFarneback(
-                prev_gray, gray, None,
-                pyr_scale=0.5,
-                levels=3,
-                winsize=15,
-                iterations=3,
-                poly_n=5,
-                poly_sigma=1.2,
-                flags=0
-            )
-            
-            # Calculate magnitude of flow vectors
-            mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-            magnitude = np.mean(mag)
-            
-            motion_magnitudes.append(magnitude)
-            frame_times.append(frame_idx / fps)
-            
+ 
+            gray = _crop(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), roi)
+            flow = _optical_flow(prev_gray, gray)
+            displacements.append(_signed_displacement(flow, axis))
             prev_gray = gray
             frame_idx += 1
-            
+ 
             if frame_idx % max(1, frame_count // 20) == 0:
-                progress = (frame_idx / frame_count) * 100
-                print(f"  Processed {frame_idx}/{frame_count} frames ({progress:.1f}%)", end='\r')
-    
-    except Exception as e:
-        print(f"Error during analysis: {e}")
-        return
-    
+                pct = frame_idx / frame_count * 100
+                print(f"  {frame_idx}/{frame_count} frames ({pct:.0f}%)", end="\r")
+    except Exception as exc:
+        print(f"\nError during analysis: {exc}")
+        raise typer.Exit(1)
     finally:
         cap.release()
-    
-    print(f"\n\nPerformed optical flow analysis on {len(motion_magnitudes)} frames")
-    print(f"Motion range: {np.min(motion_magnitudes):.4f} to {np.max(motion_magnitudes):.4f}")
-    
-    # Normalize motion signal
-    motion_array = np.array(motion_magnitudes)
-    if np.std(motion_array) > 0:
-        motion_normalized = (motion_array - np.mean(motion_array)) / np.std(motion_array)
-    else:
-        motion_normalized = motion_array
-    
-    # Apply Hann window to reduce spectral leakage
-    window = signal.windows.hann(len(motion_normalized))
-    motion_windowed = motion_normalized * window
-    
-    # Compute FFT
-    print("Computing FFT...")
-    fft_values = scipy_fft.fft(motion_windowed)
-    frequencies = scipy_fft.fftfreq(len(motion_windowed), 1/fps)
-    
-    # Get positive frequencies only
-    positive_freq_idx = frequencies > 0
-    frequencies_positive = frequencies[positive_freq_idx]
-    magnitude_spectrum = np.abs(fft_values[positive_freq_idx])
-    
-    # Normalize magnitude spectrum
-    magnitude_spectrum = magnitude_spectrum / np.max(magnitude_spectrum) if np.max(magnitude_spectrum) > 0 else magnitude_spectrum
-    
-    # Find top frequencies
-    top_indices = np.argsort(magnitude_spectrum)[-top_n:][::-1]
-    top_frequencies = frequencies_positive[top_indices]
-    top_magnitudes = magnitude_spectrum[top_indices]
-    
-    print(f"\n{'='*70}")
-    print(f"TOP {top_n} VIBRATION FREQUENCIES")
-    print(f"{'='*70}")
-    print(f"{'Rank':<6} {'Frequency (Hz)':<20} {'Magnitude (normalized)':<25} {'Period (ms)':<15}")
-    print(f"{'-'*70}")
-    
+ 
+    n_frames = len(displacements)
+    print(f"\n  Processed {n_frames} frames total.")
+ 
+    # ------------------------------------------------------------------ #
+    # Phase 3 – signal conditioning                                        #
+    # ------------------------------------------------------------------ #
+    sig = np.array(displacements, dtype=float)
+ 
+    # Remove slow drift / DC offset via linear detrend.
+    sig = signal.detrend(sig, type="linear")
+ 
+    # Normalise to unit variance.
+    std = np.std(sig)
+    if std > 0:
+        sig /= std
+ 
+    # Hann window to suppress spectral leakage.
+    window = signal.windows.hann(len(sig))
+    sig_windowed = sig * window
+ 
+    # ------------------------------------------------------------------ #
+    # Phase 4 – FFT                                                        #
+    # ------------------------------------------------------------------ #
+    print("Computing FFT …")
+    spectrum = np.abs(fft(sig_windowed))
+    freqs = fftfreq(len(sig_windowed), d=1.0 / fps)
+ 
+    # Positive frequencies only.
+    pos = freqs > 0
+    freqs_pos = freqs[pos]
+    spectrum_pos = spectrum[pos]
+ 
+    # Normalise spectrum to [0, 1].
+    peak = np.max(spectrum_pos)
+    if peak > 0:
+        spectrum_pos = spectrum_pos / peak
+ 
+    # ------------------------------------------------------------------ #
+    # Phase 5 – report                                                     #
+    # ------------------------------------------------------------------ #
+    top_idx = np.argsort(spectrum_pos)[-top_n:][::-1]
+    top_freqs = freqs_pos[top_idx]
+    top_mags = spectrum_pos[top_idx]
+ 
+    col = 72
+    print(f"\n{'=' * col}")
+    print(f"  TOP {top_n} VIBRATION FREQUENCIES  (Nyquist = {nyquist:.1f} Hz)")
+    print(f"{'=' * col}")
+    print(f"{'Rank':<6} {'Freq (Hz)':<14} {'Magnitude':<14} {'Period (ms)':<14} Notes")
+    print(f"{'-' * col}")
+ 
     results = []
-    for rank, (freq, mag) in enumerate(zip(top_frequencies, top_magnitudes), 1):
-        period_ms = (1/freq * 1000) if freq > 0 else float('inf')
-        print(f"{rank:<6} {freq:<20.2f} {mag:<25.4f} {period_ms:<15.2f}")
-        results.append({
-            'rank': rank,
-            'frequency_hz': freq,
-            'magnitude': mag,
-            'period_ms': period_ms,
-        })
-    
-    print(f"{'='*70}\n")
-    
-    # Save results if requested
-    if output_csv:
-        output_csv = Path(output_csv)
-        output_csv.parent.mkdir(parents=True, exist_ok=True)
-        
-        try:
-            import csv
-            with open(output_csv, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=['rank', 'frequency_hz', 'magnitude', 'period_ms'])
-                writer.writeheader()
-                writer.writerows(results)
-            print(f"Results saved to: {output_csv}")
-        except Exception as e:
-            print(f"Error saving results: {e}")
-
+    for rank, (freq, mag) in enumerate(zip(top_freqs, top_mags), 1):
+        period_ms = 1000.0 / freq if freq > 0 else float("inf")
+        notes = ""
+ 
+        if freq > nyquist * ALIASING_THRESHOLD:
+            # Signal is very close to or above Nyquist — aliasing likely.
+            aliased_true = fps - freq
+            notes = f"⚠ aliasing? true freq ≈ {aliased_true:.1f} Hz"
+ 
+        print(f"{rank:<6} {freq:<14.2f} {mag:<14.4f} {period_ms:<14.1f} {notes}")
+        results.append(
+            {
+                "rank": rank,
+                "frequency_hz": round(freq, 4),
+                "magnitude": round(float(mag), 6),
+                "period_ms": round(period_ms, 3),
+                "aliasing_warning": bool(notes),
+            }
+        )
+ 
+    print(f"{'=' * col}\n")
+ 
+    # ------------------------------------------------------------------ #
+    # Phase 6 – wavelet analysis                                           #
+    #                                                                      #
+    # The FFT assumes the signal is stationary (same frequencies the whole #
+    # time). The CWT makes no such assumption — it shows how frequency     #
+    # content changes over time, which lets us distinguish:                #
+    #   • A real persistent vibration  → strong, stable horizontal band   #
+    #   • A quantisation/flow artifact → intermittent, patchy blobs        #
+    #   • Two real sources             → two distinct horizontal bands     #
+    # ------------------------------------------------------------------ #
+    print("Computing continuous wavelet transform (CWT) …")
+ 
+    # Frequency axis we want to resolve — 1 Hz steps up to Nyquist.
+    cwt_freqs = np.linspace(1.0, nyquist, int(nyquist))
+ 
+    # PyWavelets uses scales; convert frequencies → scales for cmor wavelet.
+    # cmor1.5-1.0 = complex Morlet with bandwidth=1.5, centre freq=1.0 Hz.
+    import pywt
+    wavelet = "cmor1.5-1.0"
+    centre_freq = pywt.central_frequency(wavelet)
+    scales = centre_freq * fps / cwt_freqs  # scale = f_c * fs / f_target
+ 
+    # CWT on the detrended, normalised (but un-windowed) signal so we don't
+    # taper the edges and lose amplitude information at the start/end.
+    coeffs, _ = pywt.cwt(sig, scales, wavelet, sampling_period=1.0 / fps)
+    power = np.abs(coeffs) ** 2  # shape: (n_freqs, n_samples)
+ 
+    # Time axis for the scalogram.
+    t_axis = np.arange(len(sig)) / fps
+ 
+    # ── Scalogram plot ──────────────────────────────────────────────────
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+ 
+    fig, axes = plt.subplots(
+        3, 1,
+        figsize=(14, 12),
+        gridspec_kw={"height_ratios": [1, 2, 1]},
+    )
+    fig.suptitle("Vibration analysis — wavelet & FFT comparison", fontsize=13)
+ 
+    # Panel 1: raw signal
+    axes[0].plot(t_axis, sig, lw=0.5, color="steelblue")
+    axes[0].set_ylabel("Displacement\n(normalised)")
+    axes[0].set_xlabel("Time (s)")
+    axes[0].set_title("Detrended displacement signal")
+    axes[0].set_xlim(t_axis[0], t_axis[-1])
+ 
+    # Panel 2: scalogram (power in dB, log-normalised)
+    power_db = 10 * np.log10(power + 1e-12)
+    vmin, vmax = np.percentile(power_db, [5, 99])
+    im = axes[1].imshow(
+        power_db,
+        aspect="auto",
+        origin="lower",
+        extent=[t_axis[0], t_axis[-1], cwt_freqs[0], cwt_freqs[-1]],
+        cmap="inferno",
+        vmin=vmin,
+        vmax=vmax,
+    )
+    plt.colorbar(im, ax=axes[1], label="Power (dB)")
+    axes[1].set_ylabel("Frequency (Hz)")
+    axes[1].set_xlabel("Time (s)")
+    axes[1].set_title(
+        "Scalogram — persistent horizontal bands = real vibrations; "
+        "patchy blobs = artifacts"
+    )
+    # Mark the FFT-detected peaks on the scalogram
+    for freq in top_freqs:
+        axes[1].axhline(freq, color="cyan", lw=0.8, ls="--", alpha=0.7)
+ 
+    # Panel 3: time-averaged wavelet spectrum vs FFT — side-by-side comparison
+    mean_power = np.mean(power, axis=1)
+    mean_power /= np.max(mean_power) if np.max(mean_power) > 0 else 1.0
+ 
+    axes[2].plot(cwt_freqs, mean_power, color="darkorange", lw=1.5, label="Wavelet (time-avg)")
+    axes[2].plot(freqs_pos, spectrum_pos, color="steelblue", lw=1.0, alpha=0.7, label="FFT")
+    axes[2].set_xlabel("Frequency (Hz)")
+    axes[2].set_ylabel("Normalised magnitude")
+    axes[2].set_title("Time-averaged wavelet power vs FFT spectrum")
+    axes[2].legend()
+    axes[2].set_xlim(0, nyquist)
+ 
+    plt.tight_layout()
+    diag_path = video_path.with_suffix(".wavelet.png")
+    plt.savefig(diag_path, dpi=150)
+    plt.close()
+    print(f"Wavelet scalogram saved to: {diag_path}")
+ 
+    # ── Wavelet-derived frequency table ─────────────────────────────────
+    # Find peaks in the time-averaged wavelet power spectrum.
+    from scipy.signal import find_peaks
+ 
+    peaks_idx, props = find_peaks(
+        mean_power,
+        height=0.1,          # ignore anything below 10% of max
+        distance=int(len(cwt_freqs) * 0.03),  # peaks must be >3% of freq range apart
+        prominence=0.05,
+    )
+ 
+    col = 72
+    print(f"\n{'=' * col}")
+    print(f"  WAVELET-DERIVED FREQUENCIES  (Nyquist = {nyquist:.1f} Hz)")
+    print(f"{'=' * col}")
+    print(f"{'Rank':<6} {'Freq (Hz)':<14} {'Power':<14} {'Period (ms)':<14} Notes")
+    print(f"{'-' * col}")
+ 
+    # Sort peaks by power descending.
+    sorted_peaks = sorted(peaks_idx, key=lambda i: mean_power[i], reverse=True)
+    for rank, idx in enumerate(sorted_peaks[:top_n], 1):
+        freq = cwt_freqs[idx]
+        pwr = mean_power[idx]
+        period_ms = 1000.0 / freq
+        notes = ""
+        if freq > nyquist * ALIASING_THRESHOLD:
+            notes = f"⚠ aliasing? true freq ≈ {fps - freq:.1f} Hz"
+        print(f"{rank:<6} {freq:<14.1f} {pwr:<14.4f} {period_ms:<14.1f} {notes}")
+ 
+    print(f"{'=' * col}\n")
+ 
+    # ── Stationarity check ───────────────────────────────────────────────
+    # For each FFT-detected peak, check whether its wavelet power is stable
+    # over time or intermittent. A coefficient of variation (CV) > 1.0 is a
+    # strong sign of a non-stationary (possibly artifactual) source.
+    print("Stationarity check (CV > 1.0 suggests intermittent / artifact):")
+    print(f"  {'Freq (Hz)':<14} {'Mean power':<14} {'Std power':<14} {'CV':<10} Verdict")
+    print(f"  {'-' * 60}")
+    for freq in sorted(top_freqs):
+        # Find nearest CWT frequency bin.
+        bin_idx = np.argmin(np.abs(cwt_freqs - freq))
+        time_series_power = power[bin_idx, :]
+        mean_p = np.mean(time_series_power)
+        std_p = np.std(time_series_power)
+        cv = std_p / mean_p if mean_p > 0 else float("inf")
+        verdict = "✓ stationary (real)" if cv < 1.0 else "⚠ intermittent (possible artifact)"
+        print(f"  {freq:<14.1f} {mean_p:<14.4f} {std_p:<14.4f} {cv:<10.3f} {verdict}")
+ 
+    print()
+ 
 
 if __name__ == "__main__":
     APP()
