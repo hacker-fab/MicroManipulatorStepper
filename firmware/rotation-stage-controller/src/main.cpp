@@ -71,7 +71,13 @@ static char invalid_command_hint[] = "Invalid command!\n"
 " * where temp is in 1/100 degrees C, so 60C is 6000\n"
 " * \n"
 " * Put 'R' in the value to get current sensor value\n"
-" * Example: TEM R\n";
+" * Example: TEM R\n"
+" * \n"
+" * HOME\n"
+" * Home the rotation sensor\n"
+" * \n"
+" * CALI\n"
+" * Calibrate the rotation sensor. Build the angle lookup table and print it out\n";
 
 /**
  * Debug command
@@ -132,6 +138,12 @@ void parse_uart_input(){
                     return;
                 }
                 vacuum_set(parse_uint(input_buffer + 4));
+            } else if (strcmp(cmd, "CALI") == 0) {
+                rotation_home();
+                buildAngleLookupTable();
+                printAngleLookupTable();
+            } else if (strcmp(cmd, "HOME") == 0) {
+                rotation_home();
             } else {
                 Serial.println(invalid_command_hint);
                 input_index = 0;
