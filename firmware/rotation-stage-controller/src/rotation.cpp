@@ -37,8 +37,6 @@ static int32_t angle_lookup_table[LOOKUP_TABLE_SIZE] = {
 
 // PID control variables
 static float i_term = 0;
-static int32_t last_diff = 0;
-static float filtered_d_term = 0;
 
 static int32_t target_sensor_angle = 0;
 static int32_t interpolated_sensor_target_angle = 0;
@@ -87,10 +85,23 @@ static int32_t read_raw_angle() {
 
     uint32_t raw_angle = ((uint32_t)data[2] << 13) | ((uint32_t)data[3] << 5) | ((uint32_t)data[4] >> 3);
     uint8_t status = data[4]&0x07;
+    if (status & 0b001) {
+        Serial.println("Encoder Over Speed Warning!");
+        return -1;
+    }
+    if (status & 0b010) {
+        Serial.println("Encoder Weak Magnetic Warning!");
+        return -1;
+    }
+    if (status & 0b100) {
+        Serial.println("Encoder Low Voltage Warning!");
+        return -1;
+    }
     uint8_t crc = data[5];
 
     uint8_t expected_crc = calc_crc(raw_angle, status);
     if (expected_crc != crc) {
+        Serial.println("Angle Encoder Invalid CRC!");
         return -1;
     }
     return raw_angle;
@@ -380,12 +391,8 @@ int rotation_poll(uint32_t dt_us){
     i_term += ((float)diff / MT6835_CPR) * dt_us / 1000000.0 * 500; // integral term, with time in seconds
     i_term = constrain(i_term, -0.5, 0.5); // anti-windup
 
-    float d_term = (float)(diff - last_diff) / MT6835_CPR / (dt_us / 1000000.0) * 2; // derivative term
-    last_diff = diff;
-    d_term = constrain(d_term, -0.5, 0.5); // limit derivative term
-    filtered_d_term = filtered_d_term * 0.99 + d_term * 0.01; // low-pass filter for derivative term
 
-    float torque = ((float)diff / MT6835_CPR) * 20 + i_term; - filtered_d_term;
+    float torque = ((float)diff / MT6835_CPR) * 20 + i_term;
     if (torque < -1)
     {
         torque = -1;
@@ -396,7 +403,8 @@ int rotation_poll(uint32_t dt_us){
     }
     
     int32_t field_angle_diff = torque * PWM_MAX_VALUE * 2; // max torque corresponds to 90 degree field angle difference
-    uint32_t field_angle = sensorAngleToFieldAngle(sensor_angle) + field_angle_diff;
+    int32_t field_angle = sensorAngleToFieldAngle(sensor_angle) + field_angle_diff;
+    field_angle = positive_mod(field_angle, PWM_MAX_VALUE * 8);
 
     writeFieldAngle(field_angle);
 
